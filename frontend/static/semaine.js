@@ -42,7 +42,7 @@ function rendreEntete(dimanche) {
 
   const p = tableau.profil, a = tableau.prochain_a, sante = p.statut_sante || "100%";
   const badges = [];
-  if (p.mode_actif === "RACE_PREP") badges.push(`<span class="badge orange">${esc(libelleMode(p, a))}${a ? ` J-${a.dans_jours}` : ""}</span>`);
+  if (p.mode_actif === "RACE_PREP") badges.push(`<span class="badge prepa">${esc(libelleMode(p, a))}${a ? ` J-${a.dans_jours}` : ""}</span>`);
   else {
     badges.push(`<span class="badge accent">Entraînement libre</span>`);
     if (a) badges.push(`<span class="badge orange">${esc(a.titre)} J-${a.dans_jours}</span>`);
@@ -57,11 +57,11 @@ function rendreEntete(dimanche) {
 // Objectif A ou B dans les 28 prochains jours : carte sous les badges, sinon rien
 const STYLE_EVT = {
   trail_race: { icone: "ti-run", c: "var(--orange)", dim: "var(--orange-dim)" },
-  squash_competition: { icone: "ti-ball-tennis", c: "var(--purple)", dim: "var(--purple-dim)" },
+  squash_competition: { icone: "ti-ball-tennis", c: "var(--squash)", dim: "var(--squash-dim)" },
   other: { icone: "ti-calendar-event", c: "var(--text-secondary)", dim: "var(--bg-surface)" },
 };
 const COULEUR_PHASE = { BASE: ["var(--accent)", "var(--accent-dim)"], BUILD: ["var(--orange)", "var(--orange-dim)"],
-  PIC: ["var(--purple)", "var(--purple-dim)"], AFFUTAGE: ["var(--green)", "var(--green-dim)"] };
+  PIC: ["var(--phase-pic)", "var(--phase-pic-dim)"], AFFUTAGE: ["var(--green)", "var(--green-dim)"] };
 
 function rendreObjectifProche() {
   const el = $("#objectif-proche"), jour = tableau.aujourdhui;

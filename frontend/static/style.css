@@ -1,38 +1,48 @@
 /* SENSEI — thème sombre unique, conçu pour iPhone (375 px) */
 :root {
   color-scheme: dark;
-  /* Fond */
+  /* Fonds */
   --bg-app: #09090C;
-  --bg-card: #202028;
+  --bg-card: #202028;        /* relevé à #202028 (brief : #1A1A20) — voir historique git */
   --bg-card-hover: #222228;
   --bg-surface: #26262D;
+
   /* Texte */
   --text-primary: #F5F5F7;
   --text-secondary: #CDCDD4;
   --text-muted: #9494A0;
-  /* Accent */
-  --accent: #4F8EF7;
-  --accent-dim: #1A2940;
+
+  /* Bordures */
+  --border: #32323A;
+
+  /* Accent principal — violet */
+  --accent: #8B5CF6;
+  --accent-light: #A78BFA;
+  --accent-dim: #1E1040;
+
   /* Sémantiques */
   --green: #2DD4A0;
-  --green-dim: #0A2E22;
+  --green-dim: #0D3326;
   --orange: #F5A623;
   --orange-dim: #2E1F08;
   --red: #F04848;
   --red-dim: #2E0C0C;
+
   /* Disciplines */
-  --course: #4F8EF7;
-  --course-dim: #1A2940;
-  --squash: #9B6DFF;
-  --squash-dim: #1A1030;
+  --course: #8B5CF6;
+  --course-dim: #1E1040;
+  --squash: #E879F9;
+  --squash-dim: #2E1038;
   --muscu: #A0A0A6;
   --muscu-dim: #1E1E23;
   --velo: #2DD4A0;
-  --velo-dim: #0A2E22;
-  --purple: #9B6DFF;        /* alias du violet squash, utilisé par la phase PIC */
-  --purple-dim: #1A1030;
-  /* Bordures et rayons */
-  --border: #32323A;
+  --velo-dim: #0D3326;
+
+  /* Phase PIC du plan : bleu propre au graphique, pour rester distincte de BASE (accent violet) */
+  --phase-pic: #60A5FA;
+  --phase-pic-dim: #10233D;
+
+  /* Layout */
   --radius: 14px;
   --radius-sm: 8px;
 }
@@ -107,6 +117,7 @@ h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; margin: 6px 0 14
   background: var(--bg-surface); color: var(--text-secondary);
 }
 .badge.accent { background: var(--accent-dim); color: var(--accent); }
+.badge.prepa { background: var(--accent-dim); color: var(--accent-light); }
 .badge.orange { background: var(--orange-dim); color: var(--orange); }
 .badge.vert { background: var(--green-dim); color: var(--green); }
 .badge.rouge { background: var(--red-dim); color: var(--red); }
@@ -121,7 +132,7 @@ button.badge { border: 0; cursor: pointer; transition: background .2s ease; }
 /* ---- Carte de séance --------------------------------------------------------- */
 .jour { background: var(--bg-card); border-radius: var(--radius); padding: 12px 14px; border: 0.5px solid var(--border); }
 .jour + .jour { margin-top: 6px; }
-.jour.aujourdhui { border: 1px solid rgba(79, 142, 247, 0.25); background: var(--bg-card-hover); }
+.jour.aujourdhui { border: 1px solid rgba(139, 92, 246, 0.35); background: var(--bg-card-hover); }
 .jour-titre { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); font-weight: 600; margin-bottom: 8px; }
 .jour-titre b { color: var(--text-secondary); text-transform: capitalize; }
 .jour.aujourdhui .jour-titre b { color: var(--accent); }
@@ -295,10 +306,10 @@ pre.brut { white-space: pre-wrap; word-break: break-word; background: rgba(0,0,0
 .tl-mois .courant { color: var(--accent); }
 .tl-barre { position: relative; height: 32px; background: var(--bg-surface); border-radius: 6px; }
 .tl-phase { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; overflow: hidden; white-space: nowrap; }
-.tl-phase.libre { background: rgba(79, 142, 247, .15); color: var(--course); }
-.tl-phase.BASE { background: rgba(79, 142, 247, .28); color: var(--course); }
+.tl-phase.libre { background: rgba(139, 92, 246, .15); color: var(--accent-light); }
+.tl-phase.BASE { background: rgba(139, 92, 246, .32); color: var(--accent-light); }
 .tl-phase.BUILD { background: rgba(245, 166, 35, .22); color: var(--orange); }
-.tl-phase.PIC { background: rgba(155, 109, 255, .22); color: var(--squash); }
+.tl-phase.PIC { background: rgba(96, 165, 250, .25); color: var(--phase-pic); }
 .tl-phase.AFFUTAGE { background: rgba(45, 212, 160, .15); color: var(--green); }
 .tl-maintenant { position: absolute; top: -4px; bottom: 0; width: 2px; background: #fff; transform: translateX(-1px); }
 .tl-maintenant::before { content: ""; position: absolute; top: -4px; left: -3px; width: 8px; height: 8px; border-radius: 50%; background: #fff; }
@@ -361,7 +372,7 @@ dialog.feuille::backdrop { background: rgba(0, 0, 0, .6); }
 .phase-texte { font-size: 11px; color: var(--text-secondary); margin-top: 6px; line-height: 1.45; }
 .BASE-c { --c: var(--accent); --c-dim: var(--accent-dim); }
 .BUILD-c { --c: var(--orange); --c-dim: var(--orange-dim); }
-.PIC-c { --c: var(--purple); --c-dim: var(--purple-dim); }
+.PIC-c { --c: var(--phase-pic); --c-dim: var(--phase-pic-dim); }
 .AFFUTAGE-c { --c: var(--green); --c-dim: var(--green-dim); }
 .phase-carte .phase-barre { background: var(--c); }
 .phase-carte .badge { background: var(--c-dim); color: var(--c); }
@@ -372,7 +383,7 @@ dialog.feuille::backdrop { background: rgba(0, 0, 0, .6); }
 .objectif-ligne:first-child { border-top: 0; }
 .type-carre { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; font-size: 17px; flex-shrink: 0; }
 .type-carre.trail_race { background: var(--orange-dim); color: var(--orange); }
-.type-carre.squash_competition { background: var(--purple-dim); color: var(--purple); }
+.type-carre.squash_competition { background: var(--squash-dim); color: var(--squash); }
 .type-carre.other { background: var(--bg-surface); color: var(--text-secondary); }
 
 /* ---- Bouton flottant -------------------------------------------------------------------- */

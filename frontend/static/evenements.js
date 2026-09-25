@@ -9,7 +9,7 @@ let etat = null;
 async function charger() {
   etat = await api("GET", "/api/evenements");
   const prochainA = etat.evenements.find(e => e.priorite === "A");
-  $("#mode").innerHTML = `<span class="badge ${etat.profil.mode_actif === "RACE_PREP" ? "orange" : "accent"}">${esc(libelleMode(etat.profil, prochainA))}</span>`;
+  $("#mode").innerHTML = `<span class="badge ${etat.profil.mode_actif === "RACE_PREP" ? "prepa" : "accent"}">${esc(libelleMode(etat.profil, prochainA))}</span>`;
   rendreTimeline(); rendrePrincipal(); rendrePlan(); rendreAutres();
 }
 
@@ -38,10 +38,10 @@ function rendreTimeline() {
       ${evts.map(e => `<span class="tl-evt ${esc(e.type)}" style="left:${pos(e.date_evt)}%" title="${esc(e.titre)}"></span>`).join("")}
     </div>
     <div class="tl-legende">
-      <span><i style="background:rgba(79,142,247,.4)"></i>Libre</span>
-      <span><i style="background:rgba(79,142,247,.7)"></i>Base</span>
+      <span><i style="background:rgba(139,92,246,.4)"></i>Libre</span>
+      <span><i style="background:rgba(139,92,246,.75)"></i>Base</span>
       <span><i style="background:var(--orange);opacity:.7"></i>Build</span>
-      <span><i style="background:var(--squash);opacity:.7"></i>Pic</span>
+      <span><i style="background:var(--phase-pic);opacity:.7"></i>Pic</span>
       <span><i style="background:var(--green);opacity:.7"></i>Affûtage</span>
       <span><i style="background:var(--orange)"></i>Trail</span>
       <span><i style="background:var(--squash)"></i>Squash</span>
