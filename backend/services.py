@@ -287,7 +287,8 @@ def acwr_dict(a: metrics.ACWR) -> dict:
 # Import : pipeline complet
 # ---------------------------------------------------------------------------
 def importer_et_analyser(fichier_bytes: bytes, nom: str, muscu_detail: Optional[dict] = None,
-                         famille: Optional[str] = None, sous_type: Optional[str] = None) -> dict:
+                         famille: Optional[str] = None, sous_type: Optional[str] = None,
+                         analyser: bool = True) -> dict:
     # 1. Hash, anti-doublon
     h = hash_fichier(fichier_bytes)
     existant = db.seance_par_hash(h)
@@ -332,9 +333,41 @@ def importer_et_analyser(fichier_bytes: bytes, nom: str, muscu_detail: Optional[
         "prochaine_qualite_dans_h": prochaine_h,
     }
 
+    # 8-9. Analyse LLM, tracée dans analyses_llm
+    reponse, erreur, analyse_id = None, None, None
+    if analyser:
+        lundi = lundi_de(d)
+        reste = [_planifiee_llm(p) for p in db.planifiees_entre(d.isoformat(), (lundi + timedelta(days=6)).isoformat())]
+        seance_llm = _seance_llm(seance)
+        if s.famille == "muscu":
+            seance_llm["muscu_detail"] = db.muscu_detail(seance_id)
+        p = db.profil()
+        reponse, erreur, trace = _appel_llm(
+            "analyse_seance", lambda llm: llm.analyse_seance(
+                seance=seance_llm, prevu=prevu and _planifiee_llm(prevu), semaine=reste,
+                indicateurs={**indicateurs, "verdict_calcule": verdict},
+                profil=_profil_llm(p), statut_sante=p.get("statut_sante", "100%"), mode=p.get("mode_actif", "BASE")))
+        if reponse is not None:
+            verdict = _plus_severe(verdict, reponse.get("verdict"))
+        analyse_id = _tracer("analyse_seance", reponse, erreur, trace, verdict=verdict, seance_id=seance_id)
+
     # 10. Lier le prévu
     if prevu:
         db.maj("seances_planifiees", prevu["id"], {"statut": "realise", "seance_realisee_id": seance_id})
+
+    # Niveau 3 de classification : le LLM tranche un sous-type incertain
+    if reponse and s.famille in extractor.FAMILLE_COURSE and not confirme \
+            and (s.confiance or 0) < SEUIL_CONFIANCE and reponse.get("type_detecte") in SOUS_TYPES_COURSE:
+        db.maj("seances_realisees", seance_id, {"sous_type": reponse["type_detecte"], "sous_type_confirme": 1})
+        seance = db.seance(seance_id)
+
+    # 11. Ajustements : appliqués d'office sauf en rouge (validation utilisateur)
+    ajustements = (reponse or {}).get("ajustements") or []
+    validation_requise = verdict == "rouge" and bool(ajustements)
+    appliques = []
+    if ajustements and not validation_requise:
+        appliques = appliquer_ajustements(ajustements, d)
+        db.maj("analyses_llm", analyse_id, {"valide_par_user": 1})
 
     return {
         "doublon": False,
@@ -342,9 +375,12 @@ def importer_et_analyser(fichier_bytes: bytes, nom: str, muscu_detail: Optional[
         "prevu": prevu,
         "verdict": verdict,
         "indicateurs": indicateurs,
-        "analyse_llm": None,
-        "ajustements": [],
-        "validation_requise": False,
+        "analyse_id": analyse_id,
+        "analyse_llm": reponse,
+        "erreur_llm": erreur,
+        "ajustements": ajustements,
+        "ajustements_appliques": appliques,
+        "validation_requise": validation_requise,
     }
 
 
@@ -464,7 +500,7 @@ def graphiques(nb_semaines: int = 12, d: Optional[date] = None) -> dict:
         a = acwr_au(min(dimanche, d))
         semaines.append({
             "lundi": lundi.isoformat(),
-            "km": round(sum(s["distance_km"] or 0 for s in course), 1),
+            "km": round(sum(s["distance_km"] or 0 for s in course), 2),
             "dplus": round(sum(s["dplus_m"] or 0 for s in course)),
             "charge": round(metrics.charge_semaine(toutes), 1),
             "acwr": a.ratio,
@@ -548,3 +584,401 @@ def valider_planifiee(p: dict) -> dict:
             raise ValueError("Statut invalide.")
         out["statut"] = p["statut"]
     return out
+
+
+# ---------------------------------------------------------------------------
+# LLM : client, appel tracé, formats de contexte
+# ---------------------------------------------------------------------------
+_llm = None
+ORDRE_VERDICT = {"vert": 0, "orange": 1, "rouge": 2}
+
+
+def client_llm():
+    """Instancié à la demande : l'app fonctionne sans clé API (import, historique…)."""
+    global _llm
+    if _llm is None:
+        import llm_client
+        _llm = llm_client.CoachLLM()
+    return _llm
+
+
+def _appel_llm(type_appel: str, fn) -> tuple[Optional[dict], Optional[dict], dict]:
+    """Exécute fn(client). Retourne (réponse, erreur, trace tokens/coût).
+
+    Les tokens et le coût sont lus par différence sur le compteur de llm_client,
+    ce qui couvre aussi les appels dont la réponse n'est pas du JSON valide."""
+    import llm_client
+    avant = llm_client.cout_du_mois()
+    reponse, erreur = None, None
+    try:
+        reponse = fn(client_llm())
+        if not isinstance(reponse, dict):
+            raise ValueError(f"Réponse LLM inattendue (objet JSON attendu) : {str(reponse)[:500]}")
+    except ValueError as e:          # JSON invalide : message + texte brut
+        reponse, erreur = None, {"type": "json_invalide", "message": str(e)}
+    except RuntimeError as e:        # plafond mensuel
+        erreur = {"type": "plafond", "message": str(e)}
+    except Exception as e:           # clé absente, réseau, API…
+        erreur = {"type": type(e).__name__, "message": str(e)}
+    apres = llm_client.cout_du_mois()
+    meme_mois = apres.mois == avant.mois
+    trace = {
+        "modele": llm_client.MODELE_PAR_APPEL[type_appel],
+        "tokens_in": (apres.input_tokens + apres.cache_read_tokens + apres.cache_write_tokens)
+        - ((avant.input_tokens + avant.cache_read_tokens + avant.cache_write_tokens) if meme_mois else 0),
+        "tokens_out": apres.output_tokens - (avant.output_tokens if meme_mois else 0),
+        "cout_usd": round(apres.cout_usd - (avant.cout_usd if meme_mois else 0), 5),
+    }
+    return reponse, erreur, trace
+
+
+def _tracer(type_appel: str, reponse: Optional[dict], erreur: Optional[dict], trace: dict,
+            **liens) -> Optional[int]:
+    """Enregistre l'appel dans analyses_llm (sauf s'il n'a rien coûté ni rien produit)."""
+    if reponse is None and not trace["tokens_in"]:
+        return None
+    return db.inserer("analyses_llm", {
+        "type_appel": type_appel,
+        "reponse_json": reponse if reponse is not None else {"erreur": erreur},
+        "modele": trace["modele"], "tokens_in": trace["tokens_in"],
+        "tokens_out": trace["tokens_out"], "cout_usd": trace["cout_usd"],
+        "cree_le": maintenant().isoformat(timespec="seconds"),
+        **{k: v for k, v in liens.items() if v is not None},
+    })
+
+
+def _plus_severe(a: str, b: Optional[str]) -> str:
+    return b if b in ORDRE_VERDICT and ORDRE_VERDICT[b] > ORDRE_VERDICT.get(a, 0) else a
+
+
+def _seance_llm(s: dict) -> dict:
+    exclus = {"donnees_brutes", "fichier_hash", "fichier_nom", "importe_le"}
+    return {k: v for k, v in s.items() if k not in exclus}
+
+
+def _planifiee_llm(p: dict) -> dict:
+    return {"jour": jour_de(date.fromisoformat(p["date_seance"])), "date": p["date_seance"],
+            "creneau": p["creneau"], "type": p["type"], "detail": p["detail"],
+            "intensite": p["intensite"], "duree_min": p["duree_min"],
+            "distance_km": p["distance_km"], "dplus_m": p["dplus_m"], "statut": p["statut"]}
+
+
+def _profil_llm(p: dict) -> dict:
+    return {k: v for k, v in p.items() if k not in ("id", "maj_le")}
+
+
+def resume_semaines(nb: int, avant_lundi: date) -> list[dict]:
+    """Synthèse hebdo des nb semaines précédant avant_lundi (plus compact que les séances brutes)."""
+    out = []
+    for i in range(nb, 0, -1):
+        lundi = avant_lundi - timedelta(weeks=i)
+        dimanche = lundi + timedelta(days=6)
+        seances = db.seances_entre(lundi.isoformat(), dimanche.isoformat())
+        course = [s for s in seances if s["famille"] in extractor.FAMILLE_COURSE]
+        par_famille: dict[str, int] = {}
+        for s in seances:
+            par_famille[s["famille"]] = par_famille.get(s["famille"], 0) + 1
+        out.append({
+            "semaine_du": lundi.isoformat(),
+            "volume_course_km": round(sum(s["distance_km"] or 0 for s in course), 2),
+            "d_plus_m": round(sum(s["dplus_m"] or 0 for s in course)),
+            "charge": round(metrics.charge_semaine(seances), 1),
+            "seances_par_famille": par_famille,
+            "distribution_zones": metrics.distribution_hebdo(course),
+            "acwr": acwr_au(dimanche).ratio,
+        })
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Ajustements proposés par analyse_seance
+# ---------------------------------------------------------------------------
+_MOTS_TYPES = [
+    ("sortie longue", "sortie_longue"), ("sortie_longue", "sortie_longue"),
+    ("repos", "repos"), ("intervals", "intervals"), ("fractionn", "intervals"), ("vma", "intervals"),
+    ("tempo", "tempo"), ("seuil", "tempo"), ("côtes", "cotes"), ("cotes", "cotes"),
+    ("squash", "squash"), ("vélo", "velo"), ("velo", "velo"),
+    ("push", "muscu_push"), ("pull", "muscu_pull"), ("jambes", "muscu_jambes"),
+    ("ef ", "EF"), ("endurance", "EF"), ("footing", "EF"),
+]
+
+
+def type_depuis_texte(texte: str) -> Optional[str]:
+    t = f"{(texte or '').lower()} "
+    for mot, type_ in _MOTS_TYPES:
+        if mot in t:
+            return type_
+    return None
+
+
+def _minutes(texte: str) -> Optional[int]:
+    import re
+    m = re.search(r"(\d+)\s*(?:min|')", texte or "")
+    return int(m.group(1)) if m else None
+
+
+def appliquer_ajustements(ajustements: list[dict], depuis: date) -> list[dict]:
+    """Applique chaque ajustement sur la semaine de `depuis`, jours à venir uniquement."""
+    lundi = lundi_de(depuis)
+    plancher = max(depuis, aujourdhui())
+    resultats = []
+    for a in ajustements:
+        jour = (a.get("jour") or "").lower().strip()
+        if jour not in JOURS:
+            resultats.append({**a, "applique": False, "motif": f"jour inconnu « {jour} »"})
+            continue
+        d = lundi + timedelta(days=JOURS.index(jour))
+        if d < plancher:
+            resultats.append({**a, "applique": False, "motif": "jour passé"})
+            continue
+
+        propose = a.get("seance_proposee") or ""
+        candidats = [p for p in db.planifiees_entre(d.isoformat(), d.isoformat())
+                     if p["statut"] in ("prevu", "modifie") and p["seance_realisee_id"] is None]
+        type_initial = type_depuis_texte(a.get("seance_initiale") or "")
+        cible = next((p for p in candidats if p["type"] == type_initial), None) \
+            or next((p for p in candidats if p["type"] != "repos"), None) \
+            or (candidats[0] if candidats else None)
+
+        detail = f"{propose} — {a['raison']}" if a.get("raison") else propose
+        nouveau_type = type_depuis_texte(propose)
+        if cible:
+            db.maj("seances_planifiees", cible["id"], {
+                "type": nouveau_type or cible["type"],
+                "detail": detail,
+                "duree_min": _minutes(propose) or cible["duree_min"],
+                "statut": "modifie",
+                "version": cible["version"] + 1,
+                "origine": "analyse_seance",
+            })
+            resultats.append({**a, "applique": True, "seance_planifiee_id": cible["id"]})
+        else:
+            id_ = db.inserer("seances_planifiees", {
+                "date_seance": d.isoformat(), "creneau": "matin",
+                "type": nouveau_type or "autre", "detail": detail,
+                "duree_min": _minutes(propose), "statut": "modifie", "origine": "analyse_seance",
+            })
+            resultats.append({**a, "applique": True, "seance_planifiee_id": id_, "ajoutee": True})
+    return resultats
+
+
+def decider_ajustements(analyse_id: int, accepter: bool) -> dict:
+    """Verdict rouge : l'utilisateur accepte les ajustements ou garde le plan initial."""
+    a = db.analyse(analyse_id)
+    if not a or a["type_appel"] != "analyse_seance":
+        raise ValueError("Analyse introuvable.")
+    if a["valide_par_user"]:
+        raise ValueError("Décision déjà prise pour cette analyse.")
+    appliques = []
+    if accepter:
+        s = db.seance(a["seance_id"])
+        appliques = appliquer_ajustements(a["reponse_json"].get("ajustements") or [], date_de(s["date_debut"]))
+    db.maj("analyses_llm", analyse_id, {"valide_par_user": 1 if accepter else -1})
+    return {"accepte": accepter, "ajustements_appliques": appliques}
+
+
+# ---------------------------------------------------------------------------
+# Bilan hebdomadaire
+# ---------------------------------------------------------------------------
+TYPES_COURSE_PLAN = {"EF", "intervals", "cotes", "tempo", "sortie_longue"}
+DUREE_MAX_COURSE_SEMAINE = 75
+
+
+def semaine_a_planifier(d: Optional[date] = None) -> date:
+    """Lundi de la semaine à planifier : demain si on est dimanche, sinon le lundi suivant."""
+    d = d or aujourdhui()
+    return d if d.weekday() == 0 else lundi_de(d) + timedelta(weeks=1)
+
+
+def verifier_regles(seances: list[dict], jour_repos: Optional[str] = None) -> dict:
+    """Double sécurité côté code sur la semaine générée.
+    Retourne {'bloquantes': [...], 'avertissements': [...]}."""
+    bloquantes, avert = [], []
+    actives = [s for s in seances if (s.get("type") or "").lower() != "repos"]
+
+    for s in seances:
+        if (s.get("jour") or "").lower() not in JOURS:
+            bloquantes.append(f"Jour invalide : « {s.get('jour')} ».")
+    jours_charges = {(s.get("jour") or "").lower() for s in actives}
+
+    # 1. Repos complet
+    if len(jours_charges & set(JOURS)) >= 7:
+        bloquantes.append("Aucun jour de repos complet : 7 jours de charge.")
+    if jour_repos and jour_repos.lower() in jours_charges:
+        bloquantes.append(f"Le jour de repos annoncé ({jour_repos}) contient une séance.")
+
+    # 2. Au moins 2 muscu haut du corps
+    muscu_haut = [s for s in actives if s["type"].startswith("muscu") and s["type"] != "muscu_jambes"]
+    if len(muscu_haut) < 2:
+        bloquantes.append(f"{len(muscu_haut)} séance(s) de musculation haut du corps (minimum 2).")
+
+    for s in actives:
+        jour = (s.get("jour") or "").lower()
+        semaine = jour in JOURS[:5]
+        # 3. Pas de sortie longue ni de course > 1h15 en semaine
+        if semaine and s["type"] == "sortie_longue":
+            bloquantes.append(f"Sortie longue placée en semaine ({jour}).")
+        elif semaine and s["type"] in TYPES_COURSE_PLAN and (s.get("duree_min") or 0) > DUREE_MAX_COURSE_SEMAINE:
+            bloquantes.append(f"Course de {s['duree_min']} min en semaine ({jour}) : > 1h15 réservé au week-end.")
+        # Créneaux structurels
+        if semaine and s["type"] in TYPES_COURSE_PLAN and s.get("creneau") != "matin":
+            avert.append(f"Course en semaine hors créneau du matin ({jour} {s.get('creneau')}).")
+        if s["type"].startswith("muscu") and s.get("creneau") not in ("matin", None):
+            avert.append(f"Musculation hors créneau du matin ({jour} {s.get('creneau')}).")
+
+    # PUSH le matin + squash le soir : interdit
+    for jour in JOURS:
+        du_jour = [s for s in actives if (s.get("jour") or "").lower() == jour]
+        if any(s["type"] == "muscu_push" for s in du_jour) and any(s["type"] == "squash" for s in du_jour):
+            bloquantes.append(f"Muscu PUSH et squash le même jour ({jour}).")
+
+    return {"bloquantes": bloquantes, "avertissements": avert}
+
+
+def bilan_hebdo(imperatifs: dict) -> dict:
+    lundi = date.fromisoformat(imperatifs.get("semaine_debut") or semaine_a_planifier().isoformat())
+    lundi = lundi_de(lundi)
+    lundi_prec = lundi - timedelta(weeks=1)
+    dimanche_prec = lundi - timedelta(days=1)
+
+    # 1. Impératifs
+    statut = (imperatifs.get("statut_sante") or "100%").strip()
+    if not (statut == "100%" or statut.startswith(("vigilance:", "blessure:"))):
+        raise ValueError("Statut santé invalide : '100%', 'vigilance:<zone>' ou 'blessure:<zone>'.")
+    for k in ("ressenti", "sommeil"):
+        v = imperatifs.get(k)
+        if v not in (None, "") and not 1 <= int(v) <= 10:
+            raise ValueError(f"{k} doit être entre 1 et 10.")
+    db.sauver_imperatifs(lundi.isoformat(), {
+        "squash_jours": imperatifs.get("squash") or [],
+        "contraintes": imperatifs.get("contraintes") or [],
+        "ressenti": int(imperatifs["ressenti"]) if imperatifs.get("ressenti") else None,
+        "sommeil": int(imperatifs["sommeil"]) if imperatifs.get("sommeil") else None,
+        "notes": (imperatifs.get("notes") or "").strip() or None,
+    })
+    db.maj_profil(statut_sante=statut)
+
+    # 2. Chargement
+    marquer_manquees(aujourdhui())
+    ecoulee = db.seances_entre(lundi_prec.isoformat(), dimanche_prec.isoformat())
+    plan = db.planifiees_entre(lundi_prec.isoformat(), dimanche_prec.isoformat())
+    evenements = db.evenements(depuis=lundi.isoformat())
+    phase = phase_active(lundi)
+    p = db.profil()
+
+    # 3. Indicateurs
+    course = [s for s in ecoulee if s["famille"] in extractor.FAMILLE_COURSE]
+    indicateurs = {
+        "acwr": acwr_dict(acwr_au(min(dimanche_prec, aujourdhui()))),
+        "distribution_hebdo": metrics.distribution_hebdo(course),
+        "volume_course_km": round(sum(s["distance_km"] or 0 for s in course), 2),
+        "d_plus_m": round(sum(s["dplus_m"] or 0 for s in course)),
+        "charge_semaine": round(metrics.charge_semaine(ecoulee), 1),
+        "seances_manquees": [_planifiee_llm(x) for x in plan if x["statut"] == "manque"],
+    }
+    imperatifs_llm = {
+        "semaine_du": lundi.isoformat(),
+        "squash": imperatifs.get("squash") or [],
+        "contraintes": imperatifs.get("contraintes") or [],
+        "ressenti": imperatifs.get("ressenti"), "sommeil": imperatifs.get("sommeil"),
+        "notes": imperatifs.get("notes"),
+    }
+
+    # 4-5. LLM + trace
+    reponse, erreur, trace = _appel_llm("bilan_hebdo", lambda llm: llm.bilan_hebdo(
+        semaine_ecoulee=[_seance_llm(s) for s in ecoulee],
+        plan_prevu=[_planifiee_llm(x) for x in plan],
+        imperatifs=imperatifs_llm,
+        historique_4sem=resume_semaines(4, lundi_prec),
+        evenements=evenements, indicateurs=indicateurs, profil=_profil_llm(p),
+        statut_sante=statut, mode=p.get("mode_actif", "BASE"), phase_prepa=phase))
+    analyse_id = _tracer("bilan_hebdo", reponse, erreur, trace, semaine_debut=lundi.isoformat())
+
+    # Double sécurité : règles dures
+    regles = None
+    if reponse is not None:
+        sem = reponse.get("semaine_suivante") or {}
+        regles = verifier_regles(sem.get("seances") or [], sem.get("jour_repos"))
+
+    return {"analyse_id": analyse_id, "semaine_debut": lundi.isoformat(), "indicateurs": indicateurs,
+            "reponse": reponse, "erreur_llm": erreur, "regles": regles, "cout": trace["cout_usd"]}
+
+
+def valider_semaine(analyse_id: int, seances: Optional[list[dict]] = None) -> dict:
+    """Écrit la semaine (éventuellement éditée) dans seances_planifiees, si les règles dures passent."""
+    a = db.analyse(analyse_id)
+    if not a or a["type_appel"] != "bilan_hebdo" or "semaine_suivante" not in a["reponse_json"]:
+        raise ValueError("Bilan introuvable.")
+    sem = a["reponse_json"]["semaine_suivante"]
+    seances = seances if seances is not None else sem.get("seances") or []
+    regles = verifier_regles(seances, sem.get("jour_repos"))
+    if regles["bloquantes"]:
+        raise ValueError("Validation refusée, règles dures violées : " + " ; ".join(regles["bloquantes"]))
+
+    lundi = date.fromisoformat(a["semaine_debut"])
+    dimanche = lundi + timedelta(days=6)
+    lignes = []
+    for s in seances:
+        d = lundi + timedelta(days=JOURS.index(s["jour"].lower()))
+        lignes.append({**valider_planifiee({**s, "date_seance": d.isoformat(), "statut": None}),
+                       "origine": "bilan_hebdo", "cree_le": maintenant().isoformat(timespec="seconds")})
+    jour_repos = (sem.get("jour_repos") or "").lower()
+    if jour_repos in JOURS and not any(l["type"] == "repos" for l in lignes):
+        lignes.append({"date_seance": (lundi + timedelta(days=JOURS.index(jour_repos))).isoformat(),
+                       "creneau": "journee", "type": "repos", "origine": "bilan_hebdo"})
+
+    with db.connexion() as c:
+        # Remplace le plan non réalisé de la semaine ; les séances déjà liées restent
+        c.execute("DELETE FROM seances_planifiees WHERE date_seance BETWEEN ? AND ? "
+                  "AND seance_realisee_id IS NULL AND statut IN ('prevu', 'modifie', 'manque')",
+                  (lundi.isoformat(), dimanche.isoformat()))
+        for l in lignes:
+            db.inserer("seances_planifiees", l, conn=c)
+        c.execute("UPDATE analyses_llm SET valide_par_user = 1 WHERE id = ?", (analyse_id,))
+    return {"semaine_debut": lundi.isoformat(), "nb_seances": len(lignes),
+            "avertissements": regles["avertissements"]}
+
+
+# ---------------------------------------------------------------------------
+# Reconstruction après modification des événements
+# ---------------------------------------------------------------------------
+PHASES = ("BASE", "BUILD", "PIC", "AFFUTAGE")
+
+
+def reconstruire(evenement_id: Optional[int] = None) -> dict:
+    d = aujourdhui()
+    evenements = db.evenements(depuis=d.isoformat())
+    plan_actuel = db.plan_prepa()
+    p = db.profil()
+
+    reponse, erreur, trace = _appel_llm("reconstruction_evenements", lambda llm: llm.reconstruction_evenements(
+        evenements=evenements, historique=resume_semaines(8, lundi_de(d) + timedelta(weeks=1)),
+        plan_actuel={"phases": plan_actuel} if plan_actuel else None, profil=_profil_llm(p),
+        statut_sante=p.get("statut_sante", "100%"), mode=p.get("mode_actif", "BASE")))
+    lien = evenement_id if evenement_id and db.evenement(evenement_id) else None
+    analyse_id = _tracer("reconstruction_evenements", reponse, erreur, trace, evenement_id=lien)
+
+    bascule = None
+    if reponse is not None:
+        phases = []
+        courses_a = [e for e in evenements if e["type"] == "trail_race" and e["priorite"] == "A"]
+        for ph in reponse.get("plan_macro") or []:
+            try:
+                du, au = date.fromisoformat(ph["du"]), date.fromisoformat(ph["au"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if ph.get("phase") not in PHASES or au < du:
+                continue
+            cible = next((e for e in courses_a if e["date_evt"] >= du.isoformat()), None)
+            phases.append({"evenement_id": cible["id"] if cible else None, "phase": ph["phase"],
+                           "du": du.isoformat(), "au": au.isoformat(), "objectif": ph.get("objectif"),
+                           "sortie_longue_cible": ph.get("sortie_longue_cible"),
+                           "genere_le": maintenant().isoformat(timespec="seconds")})
+        if phases or not reponse.get("plan_macro"):
+            db.remplacer_plan_prepa(phases)
+        mode = reponse.get("mode_recommande")
+        if mode in ("BASE", "RACE_PREP") and mode != p.get("mode_actif"):
+            bascule = {"de": p.get("mode_actif"), "vers": mode, "le": reponse.get("bascule_le")}
+
+    return {"analyse_id": analyse_id, "reponse": reponse, "erreur_llm": erreur,
+            "plan_prepa": db.plan_prepa(), "bascule_proposee": bascule}

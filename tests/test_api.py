@@ -164,3 +164,30 @@ def test_planifiee_edition(client):
     assert p["creneau"] == "journee" and p["version"] == 1
     p2 = client.put(f"/api/planifiees/{p['id']}", json={"duree_min": 50}).json()
     assert p2["version"] == 2 and p2["statut"] == "modifie" and p2["duree_min"] == 50
+
+
+# ---- Routes LLM (sans LLM : dégradation propre) ------------------------------
+def test_evenement_declenche_reconstruction(client):
+    r = client.post("/api/evenements", json={"type": "other", "titre": "Mariage",
+                                             "date_evt": "2027-06-01"}).json()
+    assert r["evenement"]["id"]
+    assert r["reconstruction"]["erreur_llm"]["type"] == "ConnectionError"
+    assert client.delete(f"/api/evenements/{r['evenement']['id']}").json()["ok"] is True
+
+
+def test_suppression_evenement_reference_par_analyse(client):
+    import db
+    eid = client.post("/api/evenements", json={"type": "other", "titre": "X",
+                                               "date_evt": "2027-06-01"}).json()["evenement"]["id"]
+    db.inserer("analyses_llm", {"type_appel": "reconstruction_evenements", "evenement_id": eid,
+                                "reponse_json": {}})
+    assert client.delete(f"/api/evenements/{eid}").status_code == 200
+
+
+def test_dimanche_et_bilan_sans_llm(client):
+    d = client.get("/api/dimanche").json()
+    assert d["jours"][0] == "lundi"
+    r = client.post("/api/bilan", json={"semaine_debut": d["semaine_debut"], "ressenti": 7}).json()
+    assert r["reponse"] is None and r["erreur_llm"]
+    assert client.post("/api/bilan", json={"ressenti": 12}).status_code == 422
+    assert client.post("/api/bilan/999/valider", json={}).status_code == 422

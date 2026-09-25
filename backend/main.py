@@ -272,7 +272,40 @@ def api_import(fichier: UploadFile = File(...), options: str = Form("{}")):
         muscu_detail=opts.get("muscu_detail"),
         famille=opts.get("famille") or None,
         sous_type=opts.get("sous_type") or None,
+        analyser=opts.get("analyser", True) is not False,
     )
+
+
+@app.post("/api/analyses/{id_}/decision")
+def api_decision(id_: int, corps: dict = Body(...)):
+    return services.decider_ajustements(id_, bool(corps.get("accepter")))
+
+
+# ---------------------------------------------------------------------------
+# API — dimanche (bilan hebdo)
+# ---------------------------------------------------------------------------
+@app.get("/api/dimanche")
+def api_dimanche():
+    lundi = services.semaine_a_planifier()
+    return {"semaine_debut": lundi.isoformat(), "imperatifs": db.imperatifs(lundi.isoformat()),
+            "profil": db.profil(), "jours": services.JOURS}
+
+
+@app.post("/api/bilan")
+def api_bilan(imperatifs: dict = Body(...)):
+    return services.bilan_hebdo(imperatifs)
+
+
+@app.post("/api/bilan/{id_}/verifier")
+def api_bilan_verifier(id_: int, corps: dict = Body(...)):
+    a = _ou_404(db.analyse(id_), "Bilan")
+    jour_repos = ((a["reponse_json"] or {}).get("semaine_suivante") or {}).get("jour_repos")
+    return services.verifier_regles(corps.get("seances") or [], jour_repos)
+
+
+@app.post("/api/bilan/{id_}/valider")
+def api_bilan_valider(id_: int, corps: dict = Body(default={})):
+    return services.valider_semaine(id_, corps.get("seances"))
 
 
 # ---------------------------------------------------------------------------
@@ -350,18 +383,26 @@ def api_evenements():
 @app.post("/api/evenements")
 def api_evenement_creer(e: dict = Body(...)):
     id_ = db.inserer("evenements", services.valider_evenement(e))
-    return {"evenement": db.evenement(id_)}
+    return {"evenement": db.evenement(id_), "reconstruction": services.reconstruire(id_)}
 
 
 @app.put("/api/evenements/{id_}")
 def api_evenement_maj(id_: int, e: dict = Body(...)):
     _ou_404(db.evenement(id_), "Événement")
     db.maj("evenements", id_, services.valider_evenement(e))
-    return {"evenement": db.evenement(id_)}
+    return {"evenement": db.evenement(id_), "reconstruction": services.reconstruire(id_)}
 
 
 @app.delete("/api/evenements/{id_}")
 def api_evenement_supprimer(id_: int):
     _ou_404(db.evenement(id_), "Événement")
-    db.supprimer("evenements", id_)
-    return {"ok": True}
+    with db.connexion() as c:
+        # analyses_llm référence l'événement sans ON DELETE : on détache la trace
+        c.execute("UPDATE analyses_llm SET evenement_id = NULL WHERE evenement_id = ?", (id_,))
+        c.execute("DELETE FROM evenements WHERE id = ?", (id_,))
+    return {"ok": True, "reconstruction": services.reconstruire()}
+
+
+@app.post("/api/reconstruire")
+def api_reconstruire():
+    return services.reconstruire()
