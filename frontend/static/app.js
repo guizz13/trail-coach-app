@@ -135,10 +135,27 @@ function coque(droiteHTML = "") {
 // ---------------------------------------------------------------------------
 const verdictHTML = v => v ? `<span class="verdict ${esc(v)}">${VERDICTS[v] || esc(v)}</span>` : "";
 
+// Texte du coach replié sur 2 lignes ; « Voir plus » n'apparaît que s'il dépasse
+function texteReplie(texte, style = "") {
+  if (!texte) return "";
+  return `<div class="repliable"><p class="texte" style="${style}">${esc(texte)}</p><button type="button" class="voir-plus hidden">Voir plus</button></div>`;
+}
+
+function activerRepliables(racine) {
+  $$(".repliable:not([data-pret])", racine).forEach(r => {
+    r.dataset.pret = "1";
+    const t = $(".texte", r), b = $(".voir-plus", r);
+    requestAnimationFrame(() => { if (t.scrollHeight > t.clientHeight + 1) b.classList.remove("hidden"); });
+    b.onclick = () => { const ouvert = r.classList.toggle("deplie"); b.textContent = ouvert ? "Voir moins" : "Voir plus"; };
+  });
+}
+// Les pages injectent leur contenu dynamiquement : on active chaque bloc dès son insertion
+new MutationObserver(() => activerRepliables(document)).observe(document.documentElement, { childList: true, subtree: true });
+
 function messageCoach(textes, titre = "Message du coach") {
   const t = (Array.isArray(textes) ? textes : [textes]).filter(Boolean);
   if (!t.length) return "";
-  return `<div class="coach"><div class="titre">${esc(titre)}</div>${t.map(x => `<p>${esc(x)}</p>`).join("")}</div>`;
+  return `<div class="coach"><div class="titre">${esc(titre)}</div>${texteReplie(t.join(" "))}</div>`;
 }
 
 function reflexion(el, texte = "Sensei réfléchit…") {

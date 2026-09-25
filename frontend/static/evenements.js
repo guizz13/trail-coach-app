@@ -71,7 +71,7 @@ function rendreListe() {
       </div>
       <div class="ligne entre" style="margin-top:10px;align-items:flex-end">
         <div>
-          <span class="badge ${CLASSE_PRIORITE[e.priorite]}">${esc(PRIORITES[e.priorite])}</span>
+          ${avecImportance(e.type) ? `<span class="badge ${CLASSE_PRIORITE[e.priorite]}">${esc(PRIORITES[e.priorite])}</span>` : ""}
           <div class="stats-inline">
             ${e.distance_km ? `<div><b>${nb(e.distance_km, 1)}</b>km</div>` : ""}
             ${e.dplus_m ? `<div><b>${nb(e.dplus_m)}</b>m D+</div>` : ""}
@@ -110,16 +110,29 @@ function rendrePlan() {
 function champsHTML(e = {}) {
   const opt = (o, v) => Object.entries(o).map(([k, l]) => `<option value="${k}" ${k === v ? "selected" : ""}>${esc(l)}</option>`).join("");
   return `<label style="margin-top:0">Type</label><select name="type">${opt(TYPES_EVT, e.type || "trail_race")}</select>
-    <label>Importance</label><select name="priorite">${opt(PRIORITES, e.priorite || "B")}</select>
+    <div class="champ-importance"><label>Importance</label><select name="priorite">${opt(PRIORITES, e.priorite || "B")}</select></div>
     <label>Nom</label><input name="titre" value="${esc(e.titre || "")}" required>
     <label>Date</label><input type="date" name="date_evt" value="${esc(e.date_evt || "")}" required>
-    <div class="champs-2">
+    <div class="champs-2 champ-course">
       <div><label>Distance (km)</label><input name="distance_km" inputmode="decimal" value="${esc(e.distance_km ?? "")}"></div>
       <div><label>D+ (m)</label><input name="dplus_m" inputmode="numeric" value="${esc(e.dplus_m ?? "")}"></div>
     </div>
     <label>Notes</label><textarea name="notes">${esc(e.notes || "")}</textarea>
-    <label>Trace GPX (optionnel)</label><input type="file" name="gpx" accept=".gpx,application/gpx+xml">
-    <div class="sous-texte gpx-info">Distance et D+ sont remplis depuis la trace. Le profil reste sur cet appareil.</div>`;
+    <div class="champ-course"><label>Trace GPX (optionnel)</label><input type="file" name="gpx" accept=".gpx,application/gpx+xml">
+    <div class="sous-texte gpx-info">Distance et D+ sont remplis depuis la trace. Le profil reste sur cet appareil.</div></div>`;
+}
+
+// Champs selon le type : distance/D+/GPX pour un trail seulement, importance masquée en squash
+const avecDistance = type => type === "trail_race";
+const avecImportance = type => type !== "squash_competition";
+function brancherType(f) {
+  const sel = f.elements.namedItem("type");
+  const adapter = () => {
+    $$(".champ-course", f).forEach(x => x.classList.toggle("hidden", !avecDistance(sel.value)));
+    $(".champ-importance", f).classList.toggle("hidden", !avecImportance(sel.value));
+  };
+  sel.addEventListener("change", adapter);
+  adapter();
 }
 
 // Lecture du GPX choisi : pré-remplit distance et D+, garde le profil en attente
@@ -140,12 +153,15 @@ function brancherGPX(f) {
 function valeurs(f) {
   const v = Object.fromEntries(new FormData(f));
   delete v.gpx;
+  // Un champ masqué ne doit pas envoyer une valeur saisie avant le changement de type
+  if (!avecDistance(v.type)) { v.distance_km = ""; v.dplus_m = ""; }
   return v;
 }
 
 const form = $("#form");
 function preparerForm() {
   form.innerHTML = champsHTML() + `<button type="submit" class="btn principal" style="margin-top:14px">Ajouter cet objectif</button>`;
+  brancherType(form);
   const profil = brancherGPX(form);
   form.onsubmit = e => {
     e.preventDefault();
@@ -159,7 +175,9 @@ function preparerForm() {
 function editer(e) {
   const d = feuille(`<h2>${esc(e.titre)}</h2><form>${champsHTML(e)}
     <div class="boutons"><button type="button" class="btn danger" data-suppr>Supprimer</button><button type="submit" class="btn principal">Enregistrer</button></div></form>`);
-  const f = $("form", d), profil = brancherGPX(f);
+  const f = $("form", d);
+  brancherType(f);
+  const profil = brancherGPX(f);
   f.onsubmit = ev => {
     ev.preventDefault();
     d.close();

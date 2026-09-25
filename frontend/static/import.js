@@ -146,7 +146,7 @@ function afficherResultat(el, r, analyseDemandee) {
   el.innerHTML = `<div class="verdict-carte">
       <div class="tete ${r.verdict}"><span>${VERDICTS[r.verdict]}</span><span>Équilibre ${acwr.ratio == null ? "—" : nb(acwr.ratio, 2)}</span></div>
       <div class="corps">
-        ${a ? `<p>${esc(a.analyse)}</p>` : ""}
+        ${a ? texteReplie(a.analyse) : ""}
         ${signaux ? `<ul class="sous-texte" style="padding-left:16px;margin:0 0 8px">${signaux}</ul>` : ""}
         ${r.prevu ? `<div class="sous-texte">Rattachée à la séance prévue : ${esc(libelleType(r.prevu.type))}</div>` : `<div class="sous-texte">Aucune séance prévue ce jour-là.</div>`}
         ${ajustements ? `<div class="section-label" style="margin-top:12px">Ajustements proposés</div>${ajustements}` : ""}

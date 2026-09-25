@@ -177,7 +177,7 @@ async function ouvrir(id) {
       if (r.erreur) { za.appendChild(carteErreurLLM(r.erreur)); continue; }
       za.insertAdjacentHTML("beforeend", `<div class="verdict-carte">
         <div class="tete ${esc(a.verdict)}"><span>${VERDICTS[a.verdict] || ""}</span><span>${esc(dateFR(a.cree_le, { day: "numeric", month: "short" }))} · ${nb(a.cout_usd, 3)} $</span></div>
-        <div class="corps"><p>${esc(r.analyse)}</p>
+        <div class="corps">${texteReplie(r.analyse)}
           ${(r.ajustements || []).map(j => `<div class="ajustement"><b style="text-transform:capitalize">${esc(j.jour)}</b> · ${esc(j.seance_initiale)} <span class="fleche">→</span> <b>${esc(j.seance_proposee)}</b><div class="sous-texte">${esc(j.raison)}</div></div>`).join("")}
           ${a.valide_par_user === -1 ? `<div class="sous-texte">Ajustements refusés — plan initial conservé.</div>` : ""}</div></div>`);
     }

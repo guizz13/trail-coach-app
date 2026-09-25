@@ -213,7 +213,7 @@ Contexte reçu : la séance importée (données extraites), la séance prévue c
   "verdict": "vert | orange | rouge",
   "type_detecte": "EF | intervals | cotes | tempo | sortie_longue | squash | velo | muscu | inconnu",
   "conforme_au_prevu": true,
-  "analyse": "3 à 5 phrases : ce qui a été fait, ce qui est bon, ce qui dérive, pourquoi.",
+  "analyse": "2 phrases max (40 mots) : ce qui dérive ou ce qui est bon, et pourquoi.",
   "signaux": ["liste des seuils franchis, vide si vert"],
   "ajustements": [
     {
@@ -228,6 +228,8 @@ Contexte reçu : la séance importée (données extraites), la séance prévue c
 ```
 
 `validation_requise` est `true` uniquement en verdict rouge.
+
+Le champ analyse fait 2 phrases max (40 mots). Le champ message_coach fait 1-2 phrases max (30 mots). Pas de données chiffrées redondantes avec l'affichage app.
 
 ### 10.2 — `bilan_hebdo`
 
@@ -284,9 +286,11 @@ Contexte reçu : toutes les séances de la semaine écoulée, le plan prévu, le
       {"si": "fatigue ou gêne mardi matin", "alors": "intervals remplacés par EF 40 min"}
     ]
   },
-  "message_coach": "2 à 4 phrases directes à l'athlète. Le point le plus important de la semaine."
+  "message_coach": "1-2 phrases directes à l'athlète (30 mots max). Le point le plus important de la semaine."
 }
 ```
+
+Le champ analyse fait 2 phrases max (40 mots). Le champ message_coach fait 1-2 phrases max (30 mots). Pas de données chiffrées redondantes avec l'affichage app.
 
 ### 10.3 — `reconstruction_evenements`
 
@@ -334,9 +338,11 @@ Contexte reçu : la liste complète des événements (existants + nouveau), le m
       "phase_concernee": "BUILD"
     }
   ],
-  "message_coach": "3 à 5 phrases sur la cohérence globale et les points d'attention."
+  "message_coach": "1-2 phrases (30 mots max) sur la cohérence globale et le point d'attention principal."
 }
 ```
+
+Le champ analyse fait 2 phrases max (40 mots). Le champ message_coach fait 1-2 phrases max (30 mots). Pas de données chiffrées redondantes avec l'affichage app.
 
 ---
 

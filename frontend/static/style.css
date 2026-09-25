@@ -3,13 +3,13 @@
   color-scheme: dark;
   /* Fond */
   --bg-app: #08080A;
-  --bg-card: #121215;
+  --bg-card: #141418;
   --bg-card-hover: #18181C;
   --bg-surface: #1E1E23;
   /* Texte */
-  --text-primary: #F0F0F2;
-  --text-secondary: #A0A0A6;
-  --text-muted: #606066;
+  --text-primary: #F5F5F7;
+  --text-secondary: #B0B0B8;
+  --text-muted: #78787F;
   /* Accent */
   --accent: #4F8EF7;
   --accent-dim: #1A2940;
@@ -30,7 +30,7 @@
   --velo: #2DD4A0;
   --velo-dim: #0A2E22;
   /* Bordures et rayons */
-  --border: #1E1E24;
+  --border: #28282F;
   --radius: 14px;
   --radius-sm: 8px;
 }
@@ -328,3 +328,11 @@ dialog.feuille::backdrop { background: rgba(0, 0, 0, .6); }
 
 .cout { text-align: center; font-size: 10px; color: var(--text-muted); margin-top: 20px; }
 .vide { color: var(--text-muted); font-size: 12px; padding: 4px 0; }
+
+/* ---- Texte replié sur 2 lignes (messages du coach, analyses) --------------------------- */
+.repliable .texte { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.repliable.deplie .texte { display: block; -webkit-line-clamp: unset; }
+.voir-plus { background: none; border: 0; padding: 4px 0 0; color: var(--accent); font-size: 12px; font-weight: 600; cursor: pointer; }
+.repliable { margin-bottom: 8px; }
+.repliable p.texte { margin: 0; }
+.coach .repliable { margin-bottom: 0; }
