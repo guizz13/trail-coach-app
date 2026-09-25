@@ -134,7 +134,8 @@ function rendrePlan() {
         <div class="ligne entre"><span class="badge">${esc(PHASES[p.phase] || p.phase)}</span>
           <span class="sous-texte">${esc(dateFR(p.du, { day: "numeric", month: "short" }))} → ${esc(dateFR(p.au, { day: "numeric", month: "short" }))}</span></div>
         ${donnees ? `<div class="phase-donnees">${donnees}</div>` : ""}
-        ${p.objectif ? `<button type="button" class="phase-details">Détails</button><div class="phase-texte hidden">${esc(p.objectif)}</div>` : ""}
+        ${p.objectif || p.sortie_longue_cible ? `<button type="button" class="phase-details">Détails</button>
+          <div class="phase-texte hidden">${p.sortie_longue_cible ? `Sortie longue : ${esc(p.sortie_longue_cible)}<br>` : ""}${esc(p.objectif || "")}</div>` : ""}
       </div>`;
     const b = $(".phase-details", c);
     if (b) b.onclick = () => { const t = $(".phase-texte", c); t.classList.toggle("hidden"); b.textContent = t.classList.contains("hidden") ? "Détails" : "Masquer"; };

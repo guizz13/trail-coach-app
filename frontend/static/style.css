@@ -3,7 +3,7 @@
   color-scheme: dark;
   /* Fond */
   --bg-app: #09090C;
-  --bg-card: #1A1A20;
+  --bg-card: #202028;
   --bg-card-hover: #222228;
   --bg-surface: #26262D;
   /* Texte */
@@ -93,7 +93,7 @@ h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; margin: 6px 0 14
 .tabbar a.actif { color: var(--accent); }
 
 /* ---- Cartes ------------------------------------------------------------------ */
-.carte { background: var(--bg-card); border-radius: var(--radius); padding: 14px; }
+.carte { background: var(--bg-card); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 14px; }
 .carte + .carte { margin-top: 8px; }
 .grille-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .metrique .label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .6px; font-weight: 600; }
@@ -119,9 +119,9 @@ button.badge { border: 0; cursor: pointer; transition: background .2s ease; }
 .verdict.vert { color: var(--green); } .verdict.orange { color: var(--orange); } .verdict.rouge { color: var(--red); }
 
 /* ---- Carte de séance --------------------------------------------------------- */
-.jour { background: var(--bg-card); border-radius: var(--radius); padding: 12px 14px; border: 1px solid transparent; }
+.jour { background: var(--bg-card); border-radius: var(--radius); padding: 12px 14px; border: 0.5px solid var(--border); }
 .jour + .jour { margin-top: 6px; }
-.jour.aujourdhui { border-color: rgba(79, 142, 247, 0.25); background: var(--bg-card-hover); }
+.jour.aujourdhui { border: 1px solid rgba(79, 142, 247, 0.25); background: var(--bg-card-hover); }
 .jour-titre { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); font-weight: 600; margin-bottom: 8px; }
 .jour-titre b { color: var(--text-secondary); text-transform: capitalize; }
 .jour.aujourdhui .jour-titre b { color: var(--accent); }
@@ -266,7 +266,7 @@ input[type=file] { padding: 6px; font-size: 13px; }
 .stats-inline div { font-size: 11px; color: var(--text-muted); }
 .stats-inline b { display: block; font-size: 15px; color: var(--text-primary); font-weight: 700; font-variant-numeric: tabular-nums; }
 .grille-coches { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 8px; }
-.verdict-carte { border-radius: var(--radius); overflow: hidden; background: var(--bg-card); margin-top: 8px; }
+.verdict-carte { border-radius: var(--radius); overflow: hidden; background: var(--bg-card); border: 0.5px solid var(--border); margin-top: 8px; }
 .verdict-carte .tete { padding: 10px 14px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; display: flex; justify-content: space-between; }
 .verdict-carte .tete.vert { background: var(--green-dim); color: var(--green); }
 .verdict-carte .tete.orange { background: var(--orange-dim); color: var(--orange); }
@@ -285,10 +285,10 @@ pre.brut { white-space: pre-wrap; word-break: break-word; background: rgba(0,0,0
   padding: 10px; border-radius: var(--radius-sm); font-size: 11px; max-height: 260px; overflow: auto; margin: 8px 0 0; }
 
 /* ---- Chargement ---------------------------------------------------------------- */
-.reflexion { display: flex; align-items: center; gap: 10px; color: var(--text-secondary); font-size: 13px; padding: 16px 14px; background: var(--bg-card); border-radius: var(--radius); margin-top: 8px; }
+.reflexion { display: flex; align-items: center; gap: 10px; color: var(--text-secondary); font-size: 13px; padding: 16px 14px; background: var(--bg-card); border: 0.5px solid var(--border); border-radius: var(--radius); margin-top: 8px; }
 .spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--bg-surface); border-top-color: var(--accent); animation: tourne .8s linear infinite; flex-shrink: 0; }
 @keyframes tourne { to { transform: rotate(360deg); } }
-.squelette { background: var(--bg-card); border-radius: var(--radius); height: 64px; margin-top: 6px; }
+.squelette { background: var(--bg-card); border: 0.5px solid var(--border); border-radius: var(--radius); height: 64px; margin-top: 6px; }
 
 /* ---- Timeline objectifs ---------------------------------------------------------- */
 .tl-mois { display: grid; font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; margin-bottom: 8px; }
@@ -351,11 +351,11 @@ dialog.feuille::backdrop { background: rgba(0, 0, 0, .6); }
 .stats-grandes span { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; }
 
 /* ---- Objectifs : plan de préparation en cartes compactes ------------------------------- */
-.phase-carte { display: flex; gap: 12px; background: var(--bg-card); border-radius: 14px; padding: 14px; }
+.phase-carte { display: flex; gap: 12px; background: var(--bg-card); border: 0.5px solid var(--border); border-radius: 14px; padding: 14px; }
 .phase-carte + .phase-carte { margin-top: 6px; }
 .phase-barre { width: 4px; border-radius: 2px; flex-shrink: 0; }
 .phase-corps { flex: 1; min-width: 0; }
-.phase-donnees { display: grid; grid-template-columns: max-content max-content; justify-content: space-between; gap: 4px 12px; margin-top: 8px; font-size: 11px; color: var(--text-secondary); }
+.phase-donnees { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, max-content); justify-content: space-between; gap: 4px 8px; margin-top: 8px; font-size: 11px; color: var(--text-secondary); }
 .phase-donnees b { font-weight: 600; color: var(--text-primary); }
 .phase-details { background: none; border: 0; padding: 6px 0 0; font-size: 10px; color: var(--text-muted); cursor: pointer; }
 .phase-texte { font-size: 11px; color: var(--text-secondary); margin-top: 6px; line-height: 1.45; }
@@ -383,7 +383,7 @@ dialog.feuille::backdrop { background: rgba(0, 0, 0, .6); }
   display: grid; place-items: center; font-size: 24px; cursor: pointer; transition: opacity .2s ease;
 }
 .fab:active { opacity: .85; }
-.phase-donnees span { white-space: nowrap; }
+.phase-donnees span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 
 /* ---- Modale objectif ---------------------------------------------------------------------- */
 .modale-tete h2 { font-size: 18px; font-weight: 700; margin: 0; }
