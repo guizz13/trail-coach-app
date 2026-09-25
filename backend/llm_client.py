@@ -8,7 +8,8 @@ Trois types d'appels, tous en JSON strict (voir prompts/system_prompt_coach.md �
 
 Stratégie de coût :
   - System prompt mis en cache (cache_control) → 10 % du prix input aux appels suivants
-  - Modèle : claude-fable-5-1 partout (décision : le meilleur à chaque étape, budget < 5 $/mois)
+  - Modèles : claude-sonnet-5 pour analyse_seance (appel fréquent, à chaque import),
+    claude-fable-5-1 pour bilan_hebdo et reconstruction_evenements (raisonnement long)
   - Compteur de tokens persisté → alerte à 5 $ cumulés dans le mois
 
 Vérifier la syntaxe SDK à jour : https://docs.claude.com/en/api/overview
@@ -29,7 +30,7 @@ import anthropic
 # Configuration
 # ---------------------------------------------------------------------------
 MODELE_PAR_APPEL = {
-    "analyse_seance": "claude-fable-5-1",
+    "analyse_seance": "claude-sonnet-5",
     "bilan_hebdo": "claude-fable-5-1",
     "reconstruction_evenements": "claude-fable-5-1",
 }
@@ -41,7 +42,7 @@ TARIFS = {
     "claude-sonnet-5":  {"input": 2.0,  "output": 10.0, "cache_read": 0.2,  "cache_write": 2.5},
 }
 
-# Fable 5.1 réfléchit toujours et la réflexion compte dans max_tokens :
+# Fable 5.1 et Sonnet 5 réfléchissent par défaut et la réflexion compte dans max_tokens :
 # une limite basse tronque le JSON de sortie.
 MAX_TOKENS_PAR_APPEL = {
     "analyse_seance": 16000,
