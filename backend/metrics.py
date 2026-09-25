@@ -157,6 +157,7 @@ SEUILS = {
     "recovery_h":     {"rouge": 48},
 }
 CHARGE_CHRONIQUE_MIN = 50      # charge hebdo moyenne en dessous de laquelle l'ACWR n'alerte pas
+FAMILLES_COURSE = {"course_outdoor", "course_tapis"}
 
 
 @dataclass
@@ -184,21 +185,24 @@ def evaluer_seance(realise: dict, prevu: Optional[dict], acwr: Optional[ACWR],
     z45 = pct.get("z4", 0) + pct.get("z5", 0)
     epoc = realise.get("epoc") or 0
     type_prevu = (prevu or {}).get("type")
+    # Seuils de zones, d'EPOC et de volume : course uniquement. Le squash vit en Z4-Z5 par nature ;
+    # pour squash, vélo et muscu, seuls l'ACWR et la récupération s'appliquent.
+    course = realise.get("famille") in FAMILLES_COURSE
 
     # EF : dérive Z3 et EPOC
-    if type_prevu == "EF":
+    if course and type_prevu == "EF":
         _check(signaux, "epoc_sur_ef", epoc, SEUILS["epoc_ef"],
                f"EPOC {epoc:.0f} sur une séance prévue en endurance fondamentale")
         _check(signaux, "z3_sur_ef", z3, SEUILS["z3_sur_ef"],
                f"{z3:.0f} % du temps en Z3 sur une EF")
 
     # Sortie longue : intensité
-    if type_prevu == "sortie_longue":
+    if course and type_prevu == "sortie_longue":
         _check(signaux, "z45_sur_longue", z45, SEUILS["z45_sur_longue"],
                f"{z45:.0f} % du temps en Z4-Z5 sur une sortie longue")
 
     # Écart de volume
-    if prevu and prevu.get("distance_km") and realise.get("distance_km"):
+    if course and prevu and prevu.get("distance_km") and realise.get("distance_km"):
         ecart = abs(realise["distance_km"] - prevu["distance_km"]) / prevu["distance_km"] * 100
         _check(signaux, "ecart_volume", ecart, SEUILS["ecart_volume"],
                f"écart de {ecart:.0f} % entre {realise['distance_km']} km réalisés et {prevu['distance_km']} km prévus")
