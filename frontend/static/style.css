@@ -73,10 +73,30 @@ a { color: var(--accent); text-decoration: none; }
 
 /* ---- Top bar --------------------------------------------------------------- */
 .topbar { display: flex; align-items: center; justify-content: space-between; height: 52px; }
-.logo {
-  font-size: 15px; font-weight: 800; letter-spacing: 3px;
-  background: linear-gradient(90deg, #4F8EF7, #9B6DFF);
-  -webkit-background-clip: text; background-clip: text; color: transparent;
+.logo-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.logo-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #8B5CF6, #5B21B6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: -apple-system, 'Hiragino Sans', 'Yu Gothic', sans-serif;
+  font-size: 18px;
+  font-weight: 800;
+  color: #FFFFFF;
+}
+.logo-text {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--accent-light);
 }
 .avatar {
   width: 32px; height: 32px; border-radius: 50%; background: var(--bg-surface);

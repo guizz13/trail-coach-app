@@ -121,7 +121,8 @@ const ONGLETS = [["/", "ti-calendar", "Semaine"], ["/import", "ti-upload", "Impo
 function coque(droiteHTML = "") {
   const top = document.createElement("header");
   top.className = "topbar";
-  top.innerHTML = `<span class="logo">SENSEI</span><div id="topbar-droite">${droiteHTML}</div>`;
+  top.innerHTML = `<div class="logo-box"><div class="logo-icon" aria-hidden="true">先</div><span class="logo-text">Sensei</span></div>
+    <div id="topbar-droite">${droiteHTML}</div>`;
   $("main").prepend(top);
   const nav = document.createElement("nav");
   nav.className = "tabbar";
