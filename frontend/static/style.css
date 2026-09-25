@@ -2,14 +2,14 @@
 :root {
   color-scheme: dark;
   /* Fond */
-  --bg-app: #08080A;
-  --bg-card: #141418;
-  --bg-card-hover: #18181C;
-  --bg-surface: #1E1E23;
+  --bg-app: #09090C;
+  --bg-card: #1A1A20;
+  --bg-card-hover: #222228;
+  --bg-surface: #26262D;
   /* Texte */
   --text-primary: #F5F5F7;
-  --text-secondary: #B0B0B8;
-  --text-muted: #78787F;
+  --text-secondary: #CDCDD4;
+  --text-muted: #9494A0;
   /* Accent */
   --accent: #4F8EF7;
   --accent-dim: #1A2940;
@@ -30,7 +30,7 @@
   --velo: #2DD4A0;
   --velo-dim: #0A2E22;
   /* Bordures et rayons */
-  --border: #28282F;
+  --border: #32323A;
   --radius: 14px;
   --radius-sm: 8px;
 }
@@ -80,7 +80,7 @@ h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; margin: 6px 0 14
 .tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
   display: flex; padding: 6px 0 max(22px, env(safe-area-inset-bottom));
-  background: rgba(8, 8, 10, 0.92); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+  background: rgba(9, 9, 12, 0.92); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
   border-top: 0.5px solid var(--border);
 }
 .tabbar a {
@@ -206,6 +206,7 @@ select { background-image: linear-gradient(45deg, transparent 50%, var(--text-mu
   background-position: calc(100% - 15px) 50%, calc(100% - 10px) 50%; background-size: 5px 5px; background-repeat: no-repeat; padding-right: 26px; }
 textarea { min-height: 72px; resize: vertical; line-height: 1.4; }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+::placeholder { color: #7A7A84; opacity: 1; }
 input[type=checkbox] {
   width: 20px; height: 20px; min-height: 0; padding: 0; border-radius: 6px; flex-shrink: 0; cursor: pointer;
   display: inline-grid; place-content: center; margin: 0;
@@ -231,7 +232,8 @@ input[type=file] { padding: 6px; font-size: 13px; }
 .btn.principal:active { opacity: .85; }
 .btn.danger { color: var(--red); }
 .btn.petit { width: auto; padding: 8px 12px; font-size: 13px; font-weight: 500; }
-.btn:disabled { opacity: .4; cursor: not-allowed; }
+/* Désactivé : couleurs pleines plutôt qu'une opacité, pour garder le texte au-dessus de --text-muted */
+.btn:disabled { cursor: not-allowed; background: var(--bg-surface); border-color: var(--bg-surface); color: var(--text-muted); }
 .boutons { display: flex; gap: 8px; margin-top: 14px; }
 .boutons .btn { flex: 1; }
 
