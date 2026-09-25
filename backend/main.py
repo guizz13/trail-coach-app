@@ -115,7 +115,11 @@ app = FastAPI(title="Coach Hybride", docs_url=None, redoc_url=None, openapi_url=
 @app.middleware("http")
 async def _authentification(request: Request, call_next):
     if request.url.path in ROUTES_PUBLIQUES or _jeton_valide(request.cookies.get(COOKIE)):
-        return await call_next(request)
+        reponse = await call_next(request)
+        if request.url.path.startswith("/static/"):
+            # Revalidation systématique (ETag) : une mise à jour du JS/CSS est vue aussitôt
+            reponse.headers["Cache-Control"] = "no-cache"
+        return reponse
     if request.url.path.startswith("/api/"):
         return JSONResponse({"detail": "Authentification requise."}, status_code=401)
     return RedirectResponse(f"/login?suite={quote(request.url.path)}", status_code=303)

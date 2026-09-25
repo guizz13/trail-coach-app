@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Coach — historique</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js"></script>
+</head>
+<body>
+<main>
+  <h1>Historique</h1>
+
+  <div class="grille g3">
+    <section class="carte"><h2>Volume course (km / semaine)</h2><div id="g-volume"></div></section>
+    <section class="carte"><h2>ACWR (fin de semaine)</h2><div id="g-acwr"></div></section>
+    <section class="carte"><h2>Poids (kg)</h2><div id="g-poids"></div>
+      <form id="form-poids" class="ligne" style="margin-top:8px;flex-wrap:nowrap">
+        <input type="date" name="date_mesure" style="flex:1.3"><input name="poids_kg" inputmode="decimal" placeholder="kg" style="flex:1" required>
+        <button type="submit">+</button></form>
+      <div id="err-poids"></div>
+    </section>
+  </div>
+  <details class="carte"><summary>Données des graphiques (tableau)</summary><div class="defile" id="t-semaines"></div></details>
+
+  <section class="carte">
+    <h2>Séances réalisées</h2>
+    <form id="filtres" class="champs c3">
+      <div><label>Famille</label><select name="famille">
+        <option value="">Toutes</option><option value="course">Course (toutes)</option>
+        <option value="course_outdoor">Course / trail</option><option value="course_tapis">Tapis</option>
+        <option value="squash">Squash</option><option value="velo">Vélo</option><option value="muscu">Musculation</option><option value="autre">Autre</option></select></div>
+      <div><label>Du</label><input type="date" name="du"></div>
+      <div><label>Au</label><input type="date" name="au"></div>
+    </form>
+    <p class="small muted" id="compte"></p>
+    <div id="liste"></div>
+  </section>
+
+  <section class="carte"><h2>Musculation : charges par exercice</h2>
+    <select id="exo"></select><div class="defile" id="t-charges" style="margin-top:8px"></div></section>
+</main>
+<dialog id="detail"></dialog>
+<script>
+// ---- Liste --------------------------------------------------------------------
+async function chargerListe() {
+  const q = new URLSearchParams(Object.entries(Object.fromEntries(new FormData($("#filtres")))).filter(([, v]) => v));
+  const el = $("#liste");
+  try {
+    const seances = await api("GET", "/api/seances?" + q);
+    $("#compte").textContent = `${seances.length} séance(s)`;
+    el.innerHTML = "";
+    for (const s of seances) {
+      const b = document.createElement("button");
+      b.className = "liste-item";
+      b.innerHTML = `<span><b>${esc(FAMILLES[s.famille] || s.famille)}</b>${s.sous_type ? " · " + esc(s.sous_type) : ""}<br>
+        <span class="small muted">${esc(dateFR(s.date_debut, { weekday: "short", day: "numeric", month: "short", year: "numeric" }))} ${esc(heureFR(s.date_debut))}</span></span>
+        <span class="small" style="text-align:right">${esc(duree(s.duree_min))}${s.distance_km ? "<br>" + nb(s.distance_km, 2, "km") : ""}<br>
+        <span class="muted">charge ${nb(s.charge)}</span></span>`;
+      b.onclick = () => ouvrir(s.id);
+      el.appendChild(b);
+    }
+  } catch (e) { erreur(el, e); }
+}
+$("#filtres").onchange = chargerListe;
+
+// ---- Détail -------------------------------------------------------------------
+async function ouvrir(id) {
+  const dlg = $("#detail");
+  chargement(dlg);
+  dlg.showModal();
+  try {
+    const d = await api("GET", `/api/seances/${id}`);
+    const s = d.seance, m = d.muscu_detail;
+    const lig = (l, v) => `<tr><th>${l}</th><td class="n">${v}</td></tr>`;
+    dlg.innerHTML = `<div class="ligne entre"><h2 style="margin:0">${esc(FAMILLES[s.famille] || s.famille)}${s.sous_type ? " · " + esc(s.sous_type) : ""}</h2>
+        <button id="fermer" aria-label="Fermer">✕</button></div>
+      <p class="muted small">${esc(dateFR(s.date_debut, { weekday: "long", day: "numeric", month: "long", year: "numeric" }))} ${esc(heureFR(s.date_debut))} · ${esc(s.fichier_nom || "")}</p>
+      ${s.a_fc ? barreZones(zonesDepuisPct(s.temps_zones_pct)) : `<p class="muted small">Pas de FC.</p>`}
+      <table style="margin-top:10px">
+        ${lig("Durée", esc(duree(s.duree_min)))}
+        ${s.distance_km ? lig("Distance", nb(s.distance_km, 2, "km")) : ""}
+        ${s.vitesse_moy_kmh ? lig("Vitesse / allure", `${nb(s.vitesse_moy_kmh, 1, "km/h")} · ${allure(60 / s.vitesse_moy_kmh)}`) : ""}
+        ${s.dplus_m ? lig("D+ / D-", `${nb(s.dplus_m)} / ${nb(s.dmoins_m)} m`) : ""}
+        ${lig("FC moy / max", s.fc_moy ? `${s.fc_moy} / ${s.fc_max} bpm` : "—")}
+        ${lig("EPOC", nb(s.epoc, 1))}${lig("Charge", nb(s.charge, 1))}
+        ${lig("Récupération", s.recovery_time_h ? nb(s.recovery_time_h, 1, "h") : "—")}
+        ${lig("Training effect", nb(s.peak_training_effect, 1))}
+        ${lig("VO2max", nb(s.vo2max, 1))}${lig("Énergie", nb(s.energie_kcal, 0, "kcal"))}
+        ${s.sous_type ? lig("Classification", `${esc(s.sous_type)} (${s.sous_type_confirme ? "confirmée" : "confiance " + nb(100 * (s.sous_type_confiance || 0)) + " %"})`) : ""}
+      </table>
+      ${d.prevu ? `<p class="small">Séance prévue : <b>${esc(d.prevu.type)}</b> ${esc(d.prevu.detail || "")}</p>` : ""}
+      ${m ? `<h3>Musculation · ${esc(m.split || "")}</h3><p class="small">${esc((m.groupes || []).join(", "))}</p>
+        ${(m.charges || []).length ? `<table><tr><th>Exercice</th><th class="n">kg</th><th class="n">reps</th><th class="n">séries</th></tr>
+          ${m.charges.map(c => `<tr><td>${esc(c.exo)}</td><td class="n">${nb(c.kg, 1)}</td><td class="n">${nb(c.reps)}</td><td class="n">${nb(c.series)}</td></tr>`).join("")}</table>` : ""}` : ""}
+      <h3>Analyse du coach</h3>
+      ${d.analyses.length ? d.analyses.map(a => `<div class="carte">
+          <div class="ligne entre">${badgeVerdict(a.verdict)}<span class="small muted">${esc(dateFR(a.cree_le))} · ${nb(a.cout_usd, 3)} $</span></div>
+          ${a.reponse_json.erreur ? blocErreurLLM(a.reponse_json.erreur) : htmlAnalyseSeance(a.reponse_json)}
+          ${a.valide_par_user === -1 ? `<p class="small muted">Ajustements refusés (plan initial conservé).</p>` : ""}</div>`).join("")
+        : `<p class="muted small">Aucune analyse LLM.</p>`}`;
+    $("#fermer").onclick = () => dlg.close();
+  } catch (e) { erreur(dlg, e); }
+}
+
+// ---- Graphiques -------------------------------------------------------------
+async function chargerGraphiques() {
+  const g = await api("GET", "/api/graphiques");
+  const lab = iso => dateFR(iso, { day: "numeric", month: "numeric" });
+  graphBarres($("#g-volume"), g.semaines.map(s => ({ label: lab(s.lundi), valeur: s.km, detail: `semaine du ${lab(s.lundi)} · ${nb(s.dplus)} m D+` })),
+    { unite: "km", titre: "Volume course hebdomadaire" });
+  graphCourbe($("#g-acwr"), g.semaines.map(s => ({ label: lab(s.lundi), valeur: s.acwr, detail: `semaine du ${lab(s.lundi)}` })),
+    { min: 0, max: 2, bande: [0.8, 1.3], bandeLibelle: "zone optimale", seuil: 1.5, seuilLibelle: "danger 1,5", dec: 2, titre: "ACWR" });
+  graphCourbe($("#g-poids"), g.poids.slice(-24).map(p => ({ label: lab(p.date_mesure), valeur: p.poids_kg, detail: dateFR(p.date_mesure) })),
+    { unite: "kg", plancherAuto: true, titre: "Poids" });
+  $("#t-semaines").innerHTML = `<table><tr><th>Semaine</th><th class="n">km</th><th class="n">D+</th><th class="n">charge</th><th class="n">ACWR</th></tr>
+    ${g.semaines.map(s => `<tr><td>${esc(lab(s.lundi))}</td><td class="n">${nb(s.km, 1)}</td><td class="n">${nb(s.dplus)}</td>
+      <td class="n">${nb(s.charge)}</td><td class="n">${nb(s.acwr, 2)}</td></tr>`).join("")}</table>`;
+}
+
+$("#form-poids").date_mesure.value = new Date().toISOString().slice(0, 10);
+$("#form-poids").onsubmit = async e => {
+  e.preventDefault();
+  try {
+    await api("POST", "/api/poids", Object.fromEntries(new FormData(e.target)));
+    e.target.poids_kg.value = ""; $("#err-poids").innerHTML = "";
+    chargerGraphiques();
+  } catch (err) { erreur($("#err-poids"), err); }
+};
+
+// ---- Charges muscu -----------------------------------------------------------
+let charges = {};
+async function chargerCharges() {
+  charges = await api("GET", "/api/muscu/charges");
+  const exos = Object.keys(charges).sort();
+  const sel = $("#exo");
+  if (!exos.length) { sel.classList.add("hidden"); $("#t-charges").innerHTML = `<p class="muted small">Aucune charge saisie à l'import muscu.</p>`; return; }
+  sel.innerHTML = exos.map(x => `<option>${esc(x)}</option>`).join("");
+  sel.onchange = rendreCharges;
+  rendreCharges();
+}
+function rendreCharges() {
+  const lignes = charges[$("#exo").value] || [];
+  $("#t-charges").innerHTML = `<table><tr><th>Date</th><th>Split</th><th class="n">kg</th><th class="n">reps</th><th class="n">séries</th></tr>
+    ${lignes.slice().reverse().map(c => `<tr><td>${esc(dateFR(c.date))}</td><td>${esc(c.split || "")}</td>
+      <td class="n">${nb(c.kg, 1)}</td><td class="n">${nb(c.reps)}</td><td class="n">${nb(c.series)}</td></tr>`).join("")}</table>`;
+}
+
+chargerListe();
+chargerGraphiques().catch(e => erreur($("#g-volume"), e));
+chargerCharges().catch(e => erreur($("#t-charges"), e));
+if (location.hash.slice(1)) ouvrir(Number(location.hash.slice(1)));
+</script>
+</body>
+</html>
