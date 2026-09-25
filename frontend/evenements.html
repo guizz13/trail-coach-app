@@ -3,175 +3,35 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Coach — événements</title>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Sensei">
+  <meta name="theme-color" content="#08080A">
+  <title>Sensei — Objectifs</title>
+  <link rel="manifest" href="/static/manifest.json" crossorigin="use-credentials">
+  <link rel="icon" href="/static/icon-192.png">
+  <link rel="apple-touch-icon" href="/static/icon-192.png">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
   <link rel="stylesheet" href="/static/style.css">
-  <script src="/static/app.js"></script>
 </head>
 <body>
 <main>
-  <div class="ligne entre"><h1>Événements</h1><span id="mode" class="pastille"></span></div>
+  <div class="ligne entre"><h1>Objectifs</h1><span id="mode"></span></div>
 
-  <section class="carte"><h2>6 prochains mois</h2><div id="timeline"></div>
-    <div class="legende">
-      <span><i style="background:var(--series-1)"></i>BASE</span><span><i style="background:var(--series-2)"></i>BUILD</span>
-      <span><i style="background:#4a3aa7"></i>PIC</span><span><i style="background:var(--series-3)"></i>AFFÛTAGE</span>
-      <span><i style="background:var(--critical);border-radius:50%"></i>événement A</span>
-    </div>
-  </section>
+  <div class="carte" style="padding:16px" id="timeline"></div>
+  <div id="reconstruction"></div>
 
-  <div class="grille g2">
-    <section class="carte"><h2>À venir</h2><div id="liste"></div></section>
-    <section class="carte">
-      <h2 id="titre-form">Ajouter un événement</h2>
-      <form id="form">
-        <input type="hidden" name="evt_id">
-        <div class="champs">
-          <div><label>Type</label><select name="type">
-            <option value="trail_race">Trail</option><option value="squash_competition">Compétition squash</option><option value="other">Autre</option></select></div>
-          <div><label>Priorité</label><select name="priorite"><option>A</option><option selected>B</option><option>C</option></select></div>
-          <div class="plein"><label>Titre</label><input name="titre" required></div>
-          <div class="plein"><label>Date</label><input type="date" name="date_evt" required></div>
-          <div><label>Distance (km)</label><input name="distance_km" inputmode="decimal"></div>
-          <div><label>D+ (m)</label><input name="dplus_m" inputmode="numeric"></div>
-          <div class="plein"><label>Notes</label><textarea name="notes"></textarea></div>
-        </div>
-        <div class="ligne" style="margin-top:12px">
-          <button type="submit" class="primaire" id="envoyer">Ajouter</button>
-          <button type="button" id="annuler" class="hidden">Annuler</button>
-        </div>
-      </form>
-    </section>
-  </div>
+  <div class="section-label">À venir</div>
+  <div id="liste"><div class="squelette"></div></div>
 
-  <section class="carte"><div class="ligne entre"><h2 style="margin:0">Plan de préparation</h2>
-    <button id="reconstruire">Reconstruire</button></div><div id="reconstruction"></div><div id="plan"></div></section>
+  <div class="section-label">Ajouter un objectif</div>
+  <form class="carte" id="form"></form>
+
+  <div class="section-label">Plan de préparation</div>
+  <div class="carte" id="plan"></div>
+  <button type="button" class="btn" id="reconstruire" style="margin-top:8px"><i class="ti ti-refresh"></i>Reconstruire le plan</button>
 </main>
-<script>
-const form = $("#form");
-const TYPES_EVT = { trail_race: "Trail", squash_competition: "Squash", other: "Autre" };
-let etat = null;
-
-async function charger() {
-  etat = await api("GET", "/api/evenements");
-  const p = etat.profil;
-  $("#mode").innerHTML = `Mode <b>${p.mode_actif === "RACE_PREP" ? "RACE PREP" : "BASE"}</b>`;
-  rendreListe(); rendrePlan(etat.plan_prepa); rendreTimeline();
-}
-
-function rendreListe() {
-  const el = $("#liste");
-  if (!etat.evenements.length) { el.innerHTML = `<p class="muted">Aucun événement à venir.</p>`; return; }
-  el.innerHTML = "";
-  for (const e of etat.evenements) {
-    const b = document.createElement("button");
-    b.className = "liste-item";
-    b.innerHTML = `<span><b>${esc(e.titre)}</b><br><span class="small muted">${esc(TYPES_EVT[e.type])} · ${esc(dateFR(e.date_evt, { day: "numeric", month: "long", year: "numeric" }))}
-      ${e.distance_km ? " · " + nb(e.distance_km, 1, "km") : ""}${e.dplus_m ? " · " + nb(e.dplus_m, 0, "m D+") : ""}</span></span>
-      <span class="pastille"><b>${esc(e.priorite)}</b></span>`;
-    b.onclick = () => editer(e);
-    el.appendChild(b);
-  }
-}
-
-function rendrePlan(phases) {
-  $("#plan").innerHTML = phases.length ? `<div class="defile"><table><tr><th>Phase</th><th>Du</th><th>Au</th><th>Objectif</th><th>Sortie longue</th></tr>
-    ${phases.map(p => `<tr><td><b>${esc(p.phase)}</b></td><td>${esc(dateFR(p.du))}</td><td>${esc(dateFR(p.au))}</td>
-      <td>${esc(p.objectif || "")}</td><td>${esc(p.sortie_longue_cible || "")}</td></tr>`).join("")}</table></div>`
-    : `<p class="muted">Pas de plan macro (mode BASE ou pas encore reconstruit).</p>`;
-}
-
-function rendreTimeline() {
-  const debut = new Date(); debut.setDate(1); debut.setHours(12, 0, 0, 0);
-  const fin = new Date(debut); fin.setMonth(fin.getMonth() + 6);
-  const total = fin - debut;
-  const pos = iso => Math.max(0, Math.min(100, 100 * (new Date(iso + "T12:00:00") - debut) / total));
-  const mois = [];
-  for (let i = 0; i < 6; i++) {
-    const m = new Date(debut); m.setMonth(m.getMonth() + i);
-    const suiv = new Date(m); suiv.setMonth(suiv.getMonth() + 1);
-    mois.push({ label: m.toLocaleDateString("fr-FR", { month: "short" }), larg: 100 * (suiv - m) / total });
-  }
-  const phases = etat.plan_prepa.filter(p => p.au >= debut.toISOString().slice(0, 10));
-  const evts = etat.evenements.filter(e => new Date(e.date_evt) < fin);
-  $("#timeline").innerHTML = `<div class="timeline">
-    <div class="tl-mois" style="grid-template-columns:${mois.map(m => m.larg + "%").join(" ")}">${mois.map(m => `<div>${esc(m.label)}</div>`).join("")}</div>
-    <div class="tl-piste">
-      ${phases.map(p => { const g = pos(p.du), d = pos(p.au); return d > g ?
-        `<div class="tl-phase ${esc(p.phase)}" style="left:${g}%;width:${d - g}%" title="${esc(p.phase)} ${esc(p.du)} → ${esc(p.au)}">${d - g > 8 ? esc(p.phase) : ""}</div>` : ""; }).join("")}
-      <div class="tl-aujourdhui" style="left:${pos(new Date().toISOString().slice(0, 10))}%" title="aujourd'hui"></div>
-    </div>
-    <div class="tl-evts">${evts.map((e, i) => `<div class="tl-evt ${esc(e.priorite)}" style="left:${pos(e.date_evt)}%;top:${4 + (i % 2) * 18}px" title="${esc(e.titre)} (${esc(e.priorite)})">${esc(e.titre.slice(0, 14))}</div>`).join("")}</div>
-  </div>`;
-}
-
-function editer(e) {
-  form.evt_id.value = e.id; for (const k of ["type", "priorite", "titre", "date_evt", "distance_km", "dplus_m", "notes"]) form[k].value = e[k] ?? "";
-  $("#titre-form").textContent = "Modifier l'événement";
-  $("#envoyer").textContent = "Enregistrer";
-  $("#annuler").classList.remove("hidden");
-  if (!$("#supprimer")) {
-    const b = document.createElement("button");
-    b.type = "button"; b.id = "supprimer"; b.className = "danger"; b.textContent = "Supprimer";
-    b.onclick = supprimer;
-    $("#annuler").after(b);
-  }
-  form.scrollIntoView({ behavior: "smooth" });
-}
-
-function reinitialiser() {
-  form.reset(); form.evt_id.value = "";
-  $("#titre-form").textContent = "Ajouter un événement";
-  $("#envoyer").textContent = "Ajouter";
-  $("#annuler").classList.add("hidden");
-  $("#supprimer")?.remove();
-}
-$("#annuler").onclick = reinitialiser;
-
-async function executer(promesse) {
-  const zone = $("#reconstruction");
-  chargement(zone, "Reconstruction du plan par le coach (jusqu'à une minute)…");
-  $("#reconstruction").scrollIntoView({ behavior: "smooth" });
-  try {
-    const r = await promesse;
-    reinitialiser();
-    await charger();
-    afficherReconstruction(r.reconstruction || r);
-  } catch (e) { erreur(zone, e); }
-}
-
-form.onsubmit = e => {
-  e.preventDefault();
-  const v = Object.fromEntries(new FormData(form));
-  const id = v.evt_id; delete v.evt_id;
-  executer(id ? api("PUT", `/api/evenements/${id}`, v) : api("POST", "/api/evenements", v));
-};
-
-function supprimer() {
-  if (!confirm(`Supprimer « ${form.titre.value} » ?`)) return;
-  executer(api("DELETE", `/api/evenements/${form.evt_id.value}`));
-}
-$("#reconstruire").onclick = () => executer(api("POST", "/api/reconstruire"));
-
-function afficherReconstruction(r) {
-  const zone = $("#reconstruction");
-  if (!r.reponse) { zone.innerHTML = blocErreurLLM(r.erreur_llm); return; }
-  const x = r.reponse;
-  zone.innerHTML = `<div class="alerte ${x.analyse_conflits && x.analyse_conflits !== "aucun" ? "orange" : "vert"}">
-      <b>Conflits :</b> ${esc(x.analyse_conflits)}</div>
-    <p>${esc(x.message_coach)}</p>
-    ${(x.evenements_integres || []).length ? `<h3>Intégration des événements</h3><ul>${x.evenements_integres.map(e =>
-      `<li><b>${esc(e.evenement)}</b> (${esc(e.phase_concernee)}) : ${esc(e.impact)}</li>`).join("")}</ul>` : ""}
-    ${r.bascule_proposee ? `<div class="alerte orange">Le coach recommande de passer en <b>${esc(r.bascule_proposee.vers)}</b>
-      ${r.bascule_proposee.le ? "le " + esc(dateFR(r.bascule_proposee.le)) : ""}.
-      <div class="ligne" style="margin-top:8px"><button class="primaire" id="basculer">Basculer en ${esc(r.bascule_proposee.vers)}</button></div></div>` : ""}`;
-  const b = $("#basculer");
-  if (b) b.onclick = async () => {
-    try { await api("PATCH", "/api/profil", { mode_actif: r.bascule_proposee.vers }); b.disabled = true; b.textContent = "Mode changé ✓"; charger(); }
-    catch (e) { erreur(zone, e); }
-  };
-}
-
-charger().catch(e => erreur($("#liste"), e));
-</script>
+<script src="/static/app.js"></script>
+<script src="/static/evenements.js"></script>
 </body>
 </html>

@@ -3,218 +3,61 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Coach — dimanche</title>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Sensei">
+  <meta name="theme-color" content="#08080A">
+  <title>Sensei — Préparer</title>
+  <link rel="manifest" href="/static/manifest.json" crossorigin="use-credentials">
+  <link rel="icon" href="/static/icon-192.png">
+  <link rel="apple-touch-icon" href="/static/icon-192.png">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
   <link rel="stylesheet" href="/static/style.css">
-  <script src="/static/app.js"></script>
 </head>
 <body>
 <main>
-  <h1>Bilan du dimanche</h1>
-  <form id="form" class="carte">
-    <label>Semaine à planifier (lundi)</label>
-    <input type="date" name="semaine_debut" required>
-
-    <h3>Squash prévus</h3>
-    <div id="squash"></div>
-
-    <h3>Contraintes</h3>
-    <div id="contraintes"></div>
-    <button type="button" id="ajout-contrainte">+ Contrainte</button>
-
-    <div class="champs" style="margin-top:8px">
-      <div><label>Ressenti <b id="v-ressenti">7</b>/10</label><input type="range" name="ressenti" min="1" max="10" value="7"></div>
-      <div><label>Sommeil <b id="v-sommeil">7</b>/10</label><input type="range" name="sommeil" min="1" max="10" value="7"></div>
+  <h1>Préparer ta semaine</h1>
+  <form id="form">
+    <div class="carte">
+      <label style="margin-top:0">Semaine du</label>
+      <input type="date" name="semaine_debut" required>
     </div>
 
-    <h3>Statut santé</h3>
-    <div>
-      <label class="coche"><input type="radio" name="sante" value="100%" checked>100 %</label>
-      <label class="coche"><input type="radio" name="sante" value="vigilance">Vigilance</label>
-      <label class="coche"><input type="radio" name="sante" value="blessure">Blessure</label>
-    </div>
-    <div id="zone-sante" class="hidden"><label>Zone</label><input name="zone" placeholder="ex. achille gauche"></div>
+    <div class="section-label">Squash prévus</div>
+    <div class="carte" id="squash"></div>
 
-    <label>Notes</label>
+    <div class="section-label">Contraintes</div>
+    <div class="carte">
+      <div id="contraintes"></div>
+      <button type="button" class="btn petit" id="ajout-contrainte"><i class="ti ti-plus"></i>Contrainte</button>
+    </div>
+
+    <div class="section-label">Forme</div>
+    <div class="carte">
+      <div class="ligne entre"><label style="margin:0">Ressenti</label><span class="chiffre" id="v-ressenti">7</span></div>
+      <input type="range" name="ressenti" min="1" max="10" value="7">
+      <div class="ligne entre" style="margin-top:10px"><label style="margin:0">Sommeil</label><span class="chiffre" id="v-sommeil">7</span></div>
+      <input type="range" name="sommeil" min="1" max="10" value="7">
+    </div>
+
+    <div class="section-label">Statut santé</div>
+    <div class="carte">
+      <div class="segments" id="sante">
+        <button type="button" data-v="100%" class="actif">100 %</button>
+        <button type="button" data-v="vigilance">Vigilance</button>
+        <button type="button" data-v="blessure">Blessure</button>
+      </div>
+      <div id="zone-sante" class="hidden"><label>Zone concernée</label><input name="zone" placeholder="ex. achille gauche"></div>
+    </div>
+
+    <div class="section-label">Notes</div>
     <textarea name="notes" placeholder="Déplacement, fatigue, envie particulière…"></textarea>
-    <div class="ligne" style="margin-top:12px"><button type="submit" class="primaire" id="generer">Générer ma semaine</button></div>
+
+    <button type="submit" class="btn principal" id="generer" style="margin-top:16px">Générer ma semaine</button>
   </form>
   <div id="resultat"></div>
 </main>
-<script>
-const CRENEAUX_SQUASH = [["soir", "soir"], ["midi", "midi"], ["journee", "week-end / journée"]];
-const form = $("#form");
-let bilan = null, seances = [];
-
-// ---- Formulaire ------------------------------------------------------------
-$("#squash").innerHTML = JOURS.map(j => `<div class="ligne" style="margin-bottom:4px">
-    <label class="coche" style="min-width:110px"><input type="checkbox" name="sq-${j}">${j}</label>
-    <select name="sqc-${j}" style="width:auto">${CRENEAUX_SQUASH.map(([v, l]) =>
-      `<option value="${v}" ${(j === "samedi" || j === "dimanche") && v === "journee" ? "selected" : ""}>${l}</option>`).join("")}</select>
-  </div>`).join("");
-
-function ajouterContrainte(c = {}) {
-  const d = document.createElement("div");
-  d.className = "champs c3 contrainte";
-  d.innerHTML = `<div><label>Jour</label><select name="jour">${optionsHTML(JOURS, c.jour || "lundi")}</select></div>
-    <div><label>Créneau</label><select name="creneau">${optionsHTML(CRENEAUX, c.creneau || "matin")}</select></div>
-    <div class="plein"><label>Raison</label><div class="ligne" style="flex-wrap:nowrap">
-      <input name="raison" value="${esc(c.raison || "")}" placeholder="déplacement, réunion…"><button type="button" aria-label="Retirer">✕</button></div></div>`;
-  $("button", d).onclick = () => d.remove();
-  $("#contraintes").appendChild(d);
-}
-$("#ajout-contrainte").onclick = () => ajouterContrainte();
-["ressenti", "sommeil"].forEach(n => form[n].oninput = () => $("#v-" + n).textContent = form[n].value);
-$$("input[name=sante]").forEach(r => r.onchange = () => $("#zone-sante").classList.toggle("hidden", form.sante.value === "100%"));
-
-function lireImperatifs() {
-  const fd = new FormData(form);
-  const sante = fd.get("sante");
-  const zone = (fd.get("zone") || "").trim();
-  if (sante !== "100%" && !zone) throw new Error("Préciser la zone concernée.");
-  return {
-    semaine_debut: fd.get("semaine_debut"),
-    squash: JOURS.filter(j => fd.get("sq-" + j)).map(j => ({ jour: j, creneau: fd.get("sqc-" + j) })),
-    contraintes: $$(".contrainte").map(c => ({ jour: $("[name=jour]", c).value, creneau: $("[name=creneau]", c).value,
-      raison: $("[name=raison]", c).value.trim() })).filter(c => c.raison),
-    ressenti: Number(fd.get("ressenti")), sommeil: Number(fd.get("sommeil")),
-    statut_sante: sante === "100%" ? "100%" : `${sante}:${zone}`,
-    notes: fd.get("notes"),
-  };
-}
-
-async function init() {
-  const d = await api("GET", "/api/dimanche");
-  form.semaine_debut.value = d.semaine_debut;
-  const s = d.profil.statut_sante || "100%";
-  if (s !== "100%") {
-    const [niveau, zone] = s.split(":");
-    form.sante.value = niveau; form.zone.value = zone || "";
-    $("#zone-sante").classList.remove("hidden");
-  }
-  const imp = d.imperatifs;
-  if (imp) {
-    (imp.squash_jours || []).forEach(x => { form["sq-" + x.jour].checked = true; form["sqc-" + x.jour].value = x.creneau; });
-    (imp.contraintes || []).forEach(ajouterContrainte);
-    ["ressenti", "sommeil"].forEach(n => { if (imp[n]) { form[n].value = imp[n]; $("#v-" + n).textContent = imp[n]; } });
-    form.notes.value = imp.notes || "";
-  }
-}
-
-form.onsubmit = async e => {
-  e.preventDefault();
-  const res = $("#resultat");
-  let imperatifs;
-  try { imperatifs = lireImperatifs(); } catch (err) { erreur(res, err); return; }
-  $("#generer").disabled = true;
-  chargement(res, "Le coach prépare la semaine (jusqu'à une minute)…");
-  try {
-    bilan = await api("POST", "/api/bilan", imperatifs);
-    afficher();
-    res.scrollIntoView({ behavior: "smooth" });
-  } catch (err) { erreur(res, err); }
-  finally { $("#generer").disabled = false; }
-};
-
-// ---- Résultat ----------------------------------------------------------------
-function liste(titre, items) {
-  return items && items.length ? `<h3>${titre}</h3><ul>${items.map(i => `<li>${esc(i)}</li>`).join("")}</ul>` : "";
-}
-
-function afficher() {
-  const res = $("#resultat");
-  if (!bilan.reponse) { res.innerHTML = blocErreurLLM(bilan.erreur_llm); return; }
-  const r = bilan.reponse, b = r.bilan || {}, pp = r.position_prepa, ss = r.semaine_suivante || {};
-  seances = (ss.seances || []).map(s => ({ ...s }));
-  res.innerHTML = `
-    <section class="carte"><h2>Bilan de la semaine écoulée</h2>
-      <p>${esc(b.resume)}</p>
-      <div class="mesures">
-        <div class="mesure"><div class="v">${nb(b.volume_course_km, 1)} km</div><div class="l">course</div></div>
-        <div class="mesure"><div class="v">${nb(b.d_plus_m)} m</div><div class="l">D+</div></div>
-        <div class="mesure"><div class="v">${nb(b.acwr, 2)}</div><div class="l">ACWR</div></div>
-        <div class="mesure"><div class="v">${nb(bilan.indicateurs.charge_semaine)}</div><div class="l">charge</div></div>
-      </div>
-      ${b.distribution_zones ? barreZones(b.distribution_zones) : ""}
-      ${liste("Séances manquées", b.seances_manquees)}
-      ${liste("Points positifs", b.points_positifs)}
-      ${liste("Points de vigilance", b.points_de_vigilance)}
-    </section>
-    ${pp ? `<section class="carte"><h2>Position dans la prépa</h2>
-      <p><b>${esc(pp.phase)}</b> ${esc(pp.semaine || "")} — ${esc(pp.avance_retard || "")}</p><p>${esc(pp.decision || "")}</p></section>` : ""}
-    <section class="carte"><h2>Message du coach</h2><p>${esc(r.message_coach)}</p></section>
-    <section class="carte"><h2>Semaine proposée</h2>
-      <p>${esc(ss.objectif)}</p>
-      <p class="small muted">Jour de repos : <b>${esc(ss.jour_repos || "—")}</b></p>
-      <div id="table-seances"></div>
-      <button type="button" id="ajout-seance" style="margin-top:8px">+ Séance</button>
-      ${liste("Alternatives", (ss.alternatives || []).map(a => `si ${a.si} → ${a.alors}`))}
-      <div id="regles"></div>
-      <div class="ligne" style="margin-top:12px"><button class="primaire" id="valider">Valider la semaine</button></div>
-      <div id="validation"></div>
-    </section>`;
-  rendreTable();
-  afficherRegles(bilan.regles);
-  $("#ajout-seance").onclick = () => { seances.push({ jour: "lundi", creneau: "matin", type: "EF", detail: "", intensite: "", duree_min: 45 }); rendreTable(); verifier(); };
-  $("#valider").onclick = valider;
-}
-
-function rendreTable() {
-  const ordre = s => JOURS.indexOf(s.jour) * 10 + CRENEAUX.indexOf(s.creneau);
-  seances.sort((a, b) => ordre(a) - ordre(b));
-  const t = $("#table-seances");
-  // Une carte par séance : lisible et éditable au pouce sur téléphone
-  t.innerHTML = seances.map((s, i) => `<div class="seance-edit" data-i="${i}">
-      <div class="champs c3">
-        <div><label>Jour</label><select data-k="jour">${optionsHTML(JOURS, s.jour)}</select></div>
-        <div><label>Créneau</label><select data-k="creneau">${optionsHTML(CRENEAUX, s.creneau)}</select></div>
-        <div class="plein-mobile"><label>Type</label><select data-k="type">${optionsHTML(TYPES_SEANCE.includes(s.type) ? TYPES_SEANCE : [s.type, ...TYPES_SEANCE], s.type)}</select></div>
-        <div class="plein"><label>Détail</label><textarea data-k="detail" rows="2">${esc(s.detail)}</textarea></div>
-        <div><label>Intensité</label><input data-k="intensite" value="${esc(s.intensite || "")}"></div>
-        <div><label>Durée (min)</label><input data-k="duree_min" type="number" min="0" inputmode="numeric" value="${esc(s.duree_min ?? "")}"></div>
-      </div>
-      <div class="ligne" style="justify-content:flex-end;margin-top:6px"><button type="button" class="danger" data-suppr>Retirer</button></div>
-    </div>`).join("");
-  $$("[data-i]", t).forEach(tr => {
-    const s = seances[tr.dataset.i];
-    $$("[data-k]", tr).forEach(c => c.onchange = () => {
-      s[c.dataset.k] = c.dataset.k === "duree_min" ? (c.value === "" ? null : Number(c.value)) : c.value;
-      if (c.tagName === "SELECT") rendreTable();
-      verifier();
-    });
-    $("[data-suppr]", tr).onclick = () => { seances.splice(tr.dataset.i, 1); rendreTable(); verifier(); };
-  });
-}
-
-function afficherRegles(regles) {
-  const el = $("#regles");
-  if (!regles) { el.innerHTML = ""; return; }
-  el.innerHTML = (regles.bloquantes.length
-      ? `<div class="alerte rouge"><b>Règles dures violées : validation impossible.</b><ul>${regles.bloquantes.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>`
-      : `<div class="alerte vert">Règles dures respectées (repos, 2 muscu haut du corps, pas de longue en semaine).</div>`)
-    + (regles.avertissements.length ? `<div class="alerte orange"><ul>${regles.avertissements.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>` : "");
-  $("#valider").disabled = regles.bloquantes.length > 0;
-}
-
-let minuteur;
-function verifier() {
-  clearTimeout(minuteur);
-  minuteur = setTimeout(async () => {
-    try { afficherRegles(await api("POST", `/api/bilan/${bilan.analyse_id}/verifier`, { seances })); }
-    catch (e) { erreur($("#regles"), e); }
-  }, 250);
-}
-
-async function valider() {
-  const el = $("#validation");
-  try {
-    const v = await api("POST", `/api/bilan/${bilan.analyse_id}/valider`, { seances });
-    el.innerHTML = `<div class="alerte vert">Semaine du ${esc(dateFR(v.semaine_debut, { day: "numeric", month: "long" }))} enregistrée (${v.nb_seances} séances).
-      <a href="/">Voir le planning</a></div>`;
-    $("#valider").disabled = true;
-  } catch (e) { erreur(el, e); }
-}
-
-init().catch(e => erreur($("#resultat"), e));
-</script>
+<script src="/static/app.js"></script>
+<script src="/static/dimanche.js"></script>
 </body>
 </html>

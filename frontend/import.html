@@ -3,161 +3,30 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Coach — import</title>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Sensei">
+  <meta name="theme-color" content="#08080A">
+  <title>Sensei — Import</title>
+  <link rel="manifest" href="/static/manifest.json" crossorigin="use-credentials">
+  <link rel="icon" href="/static/icon-192.png">
+  <link rel="apple-touch-icon" href="/static/icon-192.png">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
   <link rel="stylesheet" href="/static/style.css">
-  <script src="/static/app.js"></script>
 </head>
 <body>
 <main>
   <h1>Importer des séances</h1>
   <label class="depot" id="depot">
     <input type="file" id="fichiers" accept=".json,application/json" multiple class="hidden">
-    <b>Déposer les fichiers JSON Suunto</b><br><span class="small">ou toucher pour choisir</span>
+    <i class="ti ti-upload"></i>
+    <div class="titre">Déposer les fichiers JSON Suunto</div>
+    <div class="sous-texte">ou toucher pour choisir</div>
   </label>
-  <p class="coche"><input type="checkbox" id="avec-llm" checked> Analyser avec le coach (LLM)</p>
-  <div id="cartes"></div>
+  <label class="coche" style="margin-top:14px"><input type="checkbox" id="avec-llm" checked>Analyser avec le coach</label>
+  <div id="cartes" style="margin-top:14px"></div>
 </main>
-<script>
-const depot = $("#depot"), input = $("#fichiers");
-["dragenter", "dragover"].forEach(ev => depot.addEventListener(ev, e => { e.preventDefault(); depot.classList.add("survol"); }));
-["dragleave", "drop"].forEach(ev => depot.addEventListener(ev, e => { e.preventDefault(); depot.classList.remove("survol"); }));
-depot.addEventListener("drop", e => traiter([...e.dataTransfer.files]));
-input.addEventListener("change", () => { traiter([...input.files]); input.value = ""; });
-
-async function traiter(fichiers) {
-  fichiers = fichiers.filter(f => f.name.toLowerCase().endsWith(".json"));
-  if (!fichiers.length) return;
-  const zone = $("#cartes");
-  const attente = document.createElement("div");
-  zone.prepend(attente);
-  chargement(attente, `Lecture de ${fichiers.length} fichier(s)…`);
-  const fd = new FormData();
-  fichiers.forEach(f => fd.append("fichiers", f));
-  try {
-    const apercus = await api("POST", "/api/import/apercu", fd);
-    attente.remove();
-    // Dernier lot en haut, fichiers dans l'ordre de dépôt
-    apercus.map((a, i) => carte(a, fichiers[i])).reverse().forEach(c => zone.prepend(c));
-  } catch (e) { erreur(attente, e); }
-}
-
-function resume(s, charge) {
-  const m = (v, l) => `<div class="mesure"><div class="v">${v}</div><div class="l">${l}</div></div>`;
-  return `<div class="mesures">
-    ${m(esc(duree(s.duree_min)), "durée")}
-    ${s.distance_km ? m(nb(s.distance_km, 2, "km"), "distance") : ""}
-    ${s.distance_km && s.allure_moy_min_km ? m(allure(s.allure_moy_min_km), "allure") : ""}
-    ${s.d_plus_m ? m(nb(s.d_plus_m, 0, "m"), "D+") : ""}
-    ${m(s.fc_moy_bpm ? `${s.fc_moy_bpm}/${s.fc_max_bpm}` : "—", "FC moy/max")}
-    ${m(nb(s.epoc, 0), "EPOC")}
-    ${m(s.recovery_time_h ? nb(s.recovery_time_h, 0, "h") : "—", "récup.")}
-    ${m(nb(charge, 0), "charge")}
-  </div>${s.a_fc ? barreZones(zonesDepuisPct(s.temps_zones_pct)) : `<p class="muted small">Pas de fréquence cardiaque dans ce fichier.</p>`}`;
-}
-
-function formulaireMuscu(a) {
-  const lignes = [0, 1, 2].map(i => `<div class="champs c4" data-charge="${i}">
-      <div class="plein"><label>Exercice ${i + 1}</label><input name="exo" placeholder="ex. développé couché haltères"></div>
-      <div><label>kg</label><input name="kg" inputmode="decimal"></div>
-      <div><label>reps</label><input name="reps" inputmode="numeric"></div>
-      <div><label>séries</label><input name="series" inputmode="numeric"></div>
-    </div>`).join("");
-  return `<h3>Détail musculation</h3>
-    <label>Split (proposé : ${esc(a.split_propose)})</label>
-    <select name="split">${optionsHTML(a.splits_muscu, a.split_propose)}</select>
-    <label>Groupes travaillés</label>
-    <div>${a.groupes_muscu.map(g => `<label class="coche"><input type="checkbox" name="groupes" value="${esc(g)}">${esc(g)}</label>`).join("")}</div>
-    <details><summary class="small">Charges (optionnel)</summary>${lignes}</details>`;
-}
-
-function carte(a, fichier) {
-  const el = document.createElement("section");
-  el.className = "carte";
-  if (a.erreur) { el.innerHTML = `<h2>${esc(a.nom)}</h2><div class="alerte rouge">${esc(a.erreur)}</div>`; return el; }
-  if (a.doublon) { el.innerHTML = `<h2>${esc(a.nom)}</h2><div class="alerte orange">Ignoré : ${esc(a.message)}</div>`; return el; }
-
-  const s = a.seance;
-  const estCourse = s.famille === "course_outdoor" || s.famille === "course_tapis";
-  el.innerHTML = `
-    <div class="ligne entre"><h2 style="margin:0">${esc(FAMILLES[s.famille] || s.famille)}${s.sous_type ? " · " + esc(s.sous_type) : ""}</h2>
-      <span class="muted small">${esc(dateFR(s.date_debut, { weekday: "long", day: "numeric", month: "long" }))} ${esc(heureFR(s.date_debut))}</span></div>
-    <p class="small muted">${esc(a.nom)}</p>
-    ${resume(s, a.charge)}
-    <form>
-      ${a.demander_famille ? `<div class="alerte orange">Type d'activité ${s.activity_type_code} inconnu : préciser la famille (mémorisée pour les prochains imports).</div>
-        <label>Famille</label><select name="famille" required><option value="">—</option>${optionsHTML(a.familles.filter(f => f !== "inconnu"), "", FAMILLES)}</select>` : ""}
-      ${estCourse ? `<label>Type de séance ${a.demander_sous_type ? `<span class="verdict orange">confiance ${nb(100 * (s.confiance || 0))} % : à vérifier</span>` : ""}</label>
-        <select name="sous_type">${optionsHTML(a.sous_types, s.sous_type)}</select>` : ""}
-      ${s.famille === "muscu" ? formulaireMuscu(a) : ""}
-      <div class="ligne" style="margin-top:12px"><button type="submit" class="primaire">Analyser</button></div>
-    </form>
-    <div class="resultat"></div>`;
-
-  const form = $("form", el);
-  const selSousType = $("select[name=sous_type]", el);
-  const sousTypeInitial = selSousType && selSousType.value;
-  form.onsubmit = async e => {
-    e.preventDefault();
-    const fd = new FormData(form);
-    const opts = { analyser: $("#avec-llm").checked };
-    if (fd.get("famille")) opts.famille = fd.get("famille");
-    // Le sous-type n'est « confirmé » que si l'utilisateur l'a touché ou si la confiance était basse
-    if (selSousType && (a.demander_sous_type || selSousType.value !== sousTypeInitial)) opts.sous_type = selSousType.value;
-    if (s.famille === "muscu") {
-      opts.muscu_detail = {
-        split: fd.get("split"),
-        groupes: fd.getAll("groupes"),
-        charges: $$("[data-charge]", el).map(l => Object.fromEntries($$("input", l).map(i => [i.name, i.value]))),
-      };
-    }
-    const envoi = new FormData();
-    envoi.append("fichier", fichier);
-    envoi.append("options", JSON.stringify(opts));
-    const res = $(".resultat", el);
-    $("button[type=submit]", form).disabled = true;
-    chargement(res, opts.analyser ? "Import et analyse du coach…" : "Import…");
-    try {
-      const r = await api("POST", "/api/import", envoi);
-      form.remove();
-      afficherResultat(res, r);
-    } catch (err) {
-      $("button[type=submit]", form).disabled = false;
-      erreur(res, err);
-    }
-  };
-  return el;
-}
-
-function afficherResultat(el, r) {
-  if (r.doublon) { el.innerHTML = `<div class="alerte orange">${esc(r.message)}</div>`; return; }
-  const signaux = (r.indicateurs.signaux || []).map(s => `<li><span class="verdict ${s.niveau}">${s.niveau}</span> ${esc(s.detail)}</li>`).join("");
-  const acwr = r.indicateurs.acwr;
-  let html = `<div class="alerte ${r.verdict}"><div class="ligne entre"><b>Verdict</b>${badgeVerdict(r.verdict)}</div>
-      <p class="small">ACWR ${acwr.ratio == null ? "—" : nb(acwr.ratio, 2)} (${esc(LIBELLE_ACWR[acwr.zone])})
-        ${r.prevu ? ` · rattachée à la séance prévue « ${esc(r.prevu.type)} »` : " · aucune séance prévue rattachée"}</p>
-      ${signaux ? `<ul>${signaux}</ul>` : ""}</div>`;
-  html += blocErreurLLM(r.erreur_llm);
-  if (r.analyse_llm) html += htmlAnalyseSeance(r.analyse_llm);
-  if ((r.ajustements_appliques || []).length) {
-    html += `<p class="small">Ajustements : ${r.ajustements_appliques.map(x =>
-      `${esc(x.jour)} ${x.applique ? "appliqué ✓" : "non appliqué (" + esc(x.motif) + ")"}`).join(" · ")}</p>`;
-  }
-  if (r.validation_requise) {
-    html += `<div class="alerte rouge"><b>Verdict rouge : validation requise.</b>
-      <div class="ligne" style="margin-top:8px"><button class="primaire" data-d="1">Accepter les ajustements</button>
-      <button data-d="0">Garder le plan initial</button></div><div class="decision"></div></div>`;
-  }
-  el.innerHTML = html;
-  $$("[data-d]", el).forEach(b => b.onclick = async () => {
-    const zone = $(".decision", el);
-    try {
-      const d = await api("POST", `/api/analyses/${r.analyse_id}/decision`, { accepter: b.dataset.d === "1" });
-      $$("[data-d]", el).forEach(x => x.disabled = true);
-      zone.innerHTML = `<p class="small">${d.accepte ? "Ajustements appliqués : " + d.ajustements_appliques.map(x =>
-        `${esc(x.jour)} ${x.applique ? "✓" : "(" + esc(x.motif) + ")"}`).join(" · ") : "Plan initial conservé."}</p>`;
-    } catch (e) { erreur(zone, e); }
-  });
-}
-</script>
+<script src="/static/app.js"></script>
+<script src="/static/import.js"></script>
 </body>
 </html>

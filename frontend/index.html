@@ -3,130 +3,46 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Coach — semaine</title>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Sensei">
+  <meta name="theme-color" content="#08080A">
+  <title>Sensei — Semaine</title>
+  <link rel="manifest" href="/static/manifest.json" crossorigin="use-credentials">
+  <link rel="icon" href="/static/icon-192.png">
+  <link rel="apple-touch-icon" href="/static/icon-192.png">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
   <link rel="stylesheet" href="/static/style.css">
-  <script src="/static/app.js"></script>
 </head>
 <body>
 <main>
-  <div class="ligne entre">
-    <h1 id="titre">Semaine</h1>
-    <div class="ligne">
-      <button id="prec" aria-label="Semaine précédente">‹</button>
-      <button id="courante">Aujourd'hui</button>
-      <button id="suiv" aria-label="Semaine suivante">›</button>
-    </div>
+  <div class="nav-semaine">
+    <button class="btn-icone" id="prec" aria-label="Semaine précédente"><i class="ti ti-chevron-left"></i></button>
+    <span id="titre-semaine">Semaine</span>
+    <button class="btn-icone" id="suiv" aria-label="Semaine suivante"><i class="ti ti-chevron-right"></i></button>
   </div>
-  <div id="bandeau" class="bandeau carte"></div>
-  <div id="semaine" class="semaine"></div>
-  <p class="ligne" style="margin:8px 0 16px"><button id="ajouter">+ Ajouter une séance</button></p>
-  <div class="grille g3">
-    <section class="carte"><h2>ACWR</h2><div id="acwr"></div></section>
-    <section class="carte"><h2>Distribution course (semaine)</h2><div id="distribution"></div></section>
-    <section class="carte"><h2>Charge & coût</h2><div id="charge"></div></section>
+  <div class="badges" id="badges"></div>
+  <div id="coach"></div>
+
+  <div class="section-label">État de forme</div>
+  <div class="grille-2">
+    <div class="carte metrique" id="charge"></div>
+    <div class="carte metrique" id="zones"></div>
   </div>
-  <section class="carte"><h2>Dernière analyse du coach</h2><div id="analyse"></div></section>
+
+  <div class="carte" style="margin-top:8px">
+    <div class="ligne entre"><span class="metrique"><span class="label">Volume course (km / semaine)</span></span>
+      <span class="secondaire" id="km-semaine"></span></div>
+    <div id="g-volume" style="margin-top:10px"></div>
+  </div>
+
+  <div class="ligne entre"><div class="section-label">Planning</div>
+    <button class="btn petit" id="ajouter" style="margin-top:14px"><i class="ti ti-plus"></i>Séance</button></div>
+  <div id="planning"><div class="squelette"></div><div class="squelette"></div><div class="squelette"></div></div>
+
+  <div class="cout" id="cout"></div>
 </main>
-<script>
-let lundiAffiche = null, aujourdhui = null;
-
-function carteSeance(p) {
-  const b = document.createElement("button");
-  b.className = `seance ${p.statut}`;
-  b.innerHTML = `<span class="st">${esc(STATUTS[p.statut] || p.statut)}</span>
-    <span class="t">${esc(p.type)}</span> <span class="muted">${esc(p.creneau)}</span><br>
-    <span class="small">${esc([p.duree_min && duree(p.duree_min), p.distance_km && nb(p.distance_km, 1, "km")].filter(Boolean).join(" · "))}</span>
-    ${p.detail ? `<div class="small muted">${esc(p.detail)}</div>` : ""}`;
-  b.onclick = () => editerSeance(p, () => charger(lundiAffiche));
-  return b;
-}
-
-function carteRealisee(s) {
-  const a = document.createElement("a");
-  a.className = "seance hors-plan";
-  a.href = `/historique#${s.id}`;
-  a.style.textDecoration = "none";
-  a.innerHTML = `<span class="st">hors plan ✓</span><span class="t">${esc(FAMILLES[s.famille] || s.famille)}</span>
-    <span class="muted">${esc(heureFR(s.date_debut))}</span><br>
-    <span class="small">${esc(duree(s.duree_min))}${s.distance_km ? " · " + nb(s.distance_km, 1, "km") : ""}</span>`;
-  return a;
-}
-
-function rendreSemaine(jours) {
-  const el = $("#semaine");
-  el.innerHTML = "";
-  for (const j of jours) {
-    const d = document.createElement("div");
-    d.className = "jour" + (j.date === aujourdhui ? " aujourdhui" : "");
-    d.innerHTML = `<h3>${esc(j.jour)} ${esc(dateFR(j.date, { day: "numeric", month: "short" }))}</h3>`;
-    j.planifiees.forEach(p => d.appendChild(carteSeance(p)));
-    j.realisees_hors_plan.forEach(s => d.appendChild(carteRealisee(s)));
-    if (!j.planifiees.length && !j.realisees_hors_plan.length) d.insertAdjacentHTML("beforeend", `<p class="small muted">—</p>`);
-    el.appendChild(d);
-  }
-}
-
-async function charger(lundi) {
-  try {
-    const d = await api("GET", "/api/dashboard");
-    aujourdhui = d.aujourdhui;
-    lundiAffiche = lundi || d.lundi;
-    const jours = lundiAffiche === d.lundi ? d.semaine : await api("GET", `/api/semaine?lundi=${lundiAffiche}`);
-    $("#titre").textContent = lundiAffiche === d.lundi ? "Cette semaine" : `Semaine du ${dateFR(lundiAffiche, { day: "numeric", month: "long" })}`;
-    rendreSemaine(jours);
-
-    // Bandeau
-    const p = d.profil, sante = p.statut_sante || "100%";
-    const niveauSante = sante.startsWith("blessure") ? "rouge" : sante.startsWith("vigilance") ? "orange" : "vert";
-    $("#bandeau").innerHTML = `
-      <span class="pastille">Mode <b>${esc(p.mode_actif === "RACE_PREP" ? "RACE PREP" : "BASE")}</b></span>
-      ${d.phase ? `<span class="pastille">Phase <b>${esc(d.phase.phase)}</b> jusqu'au ${esc(dateFR(d.phase.au))}</span>` : ""}
-      ${d.prochain_a ? `<span class="pastille">${esc(d.prochain_a.titre)} dans <b>J-${d.prochain_a.dans_jours}</b></span>`
-        : `<span class="pastille muted">Aucun événement A</span>`}
-      <span class="pastille">Santé <span class="verdict ${niveauSante}">${esc(sante.replace(":", " : "))}</span></span>`;
-
-    // ACWR
-    const a = d.acwr, v = VERDICT_ACWR[a.zone];
-    $("#acwr").innerHTML = `<div class="ligne"><span style="font-size:2rem;font-weight:700">${a.ratio == null ? "—" : nb(a.ratio, 2)}</span>
-      <span class="verdict ${v}">${esc(LIBELLE_ACWR[a.zone])}</span></div>
-      <p class="small muted">Aiguë ${nb(a.charge_aigue)} · chronique ${nb(a.charge_chronique)} (moy. 4 sem.)<br>Zone optimale 0,8–1,3 · danger &gt; 1,5</p>`;
-
-    // Distribution
-    const dist = d.distribution;
-    $("#distribution").innerHTML = barreZones(dist)
-      + (dist.note ? "" : `<p class="small" style="margin-top:8px"><span class="verdict ${dist.verdict}">${dist.verdict === "vert" ? "polarisée" : "trop de Z3/Z4"}</span> cible ≈ 80 % Z1-Z2</p>`);
-
-    // Charge & coût
-    const c = d.cout_llm, pct = Math.min(100, 100 * c.cout_usd / c.plafond_usd);
-    $("#charge").innerHTML = `<div class="mesures">
-        <div class="mesure"><div class="v">${nb(d.charge_semaine)}</div><div class="l">charge semaine</div></div>
-        <div class="mesure"><div class="v">${nb(c.cout_usd, 2)} $</div><div class="l">LLM ${esc(c.mois)} / ${nb(c.plafond_usd)} $</div></div>
-      </div>
-      <div class="zones" style="height:8px" role="img" aria-label="${nb(pct)} % du plafond"><div style="flex:${pct};background:${pct > 80 ? "var(--critical)" : "var(--series-1)"}"></div><div style="flex:${100 - pct}"></div></div>
-      <p class="small muted">${c.nb_appels} appel(s) ce mois</p>`;
-
-    // Dernière analyse
-    const an = d.derniere_analyse;
-    if (!an) $("#analyse").innerHTML = `<p class="muted">Aucune analyse pour l'instant.</p>`;
-    else {
-      const r = an.reponse_json || {};
-      const texte = r.message_coach || r.analyse || (r.erreur && r.erreur.message) || "";
-      $("#analyse").innerHTML = `<div class="ligne">${badgeVerdict(an.verdict)}<span class="muted small">${esc(an.type_appel.replace("_", " "))} · ${esc(dateFR(an.cree_le))}</span></div>
-        <p style="margin-top:8px">${esc(texte)}</p>`;
-    }
-  } catch (e) { erreur($("#semaine"), e); }
-}
-
-function decaler(semaines) {
-  const d = new Date(lundiAffiche + "T12:00:00");
-  d.setDate(d.getDate() + 7 * semaines);
-  charger(d.toISOString().slice(0, 10));
-}
-$("#prec").onclick = () => decaler(-1);
-$("#suiv").onclick = () => decaler(1);
-$("#courante").onclick = () => { lundiAffiche = null; charger(null); };
-$("#ajouter").onclick = () => editerSeance({ date_seance: aujourdhui, creneau: "matin", type: "EF", statut: "prevu" }, () => charger(lundiAffiche));
-charger(null);
-</script>
+<script src="/static/app.js"></script>
+<script src="/static/semaine.js"></script>
 </body>
 </html>
