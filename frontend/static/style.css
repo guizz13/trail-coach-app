@@ -336,7 +336,7 @@ dialog.feuille::backdrop { background: rgba(0, 0, 0, .6); }
 /* ---- Texte replié sur 2 lignes (messages du coach, analyses) --------------------------- */
 .repliable .texte { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .repliable.deplie .texte { display: block; -webkit-line-clamp: unset; }
-.voir-plus { background: none; border: 0; padding: 4px 0 0; color: var(--accent); font-size: 12px; font-weight: 600; cursor: pointer; }
+.voir-plus { background: none; border: 0; padding: 4px 0 0; color: var(--accent); font-size: 11px; font-weight: 600; cursor: pointer; }
 .repliable { margin-bottom: 8px; }
 .repliable p.texte { margin: 0; }
 .coach .repliable { margin-bottom: 0; }

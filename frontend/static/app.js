@@ -146,7 +146,7 @@ function activerRepliables(racine) {
     r.dataset.pret = "1";
     const t = $(".texte", r), b = $(".voir-plus", r);
     requestAnimationFrame(() => { if (t.scrollHeight > t.clientHeight + 1) b.classList.remove("hidden"); });
-    b.onclick = () => { const ouvert = r.classList.toggle("deplie"); b.textContent = ouvert ? "Voir moins" : "Voir plus"; };
+    b.onclick = () => { const ouvert = r.classList.toggle("deplie"); b.textContent = ouvert ? "Réduire" : "Voir plus"; };
   });
 }
 // Les pages injectent leur contenu dynamiquement : on active chaque bloc dès son insertion

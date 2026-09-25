@@ -229,7 +229,7 @@ Contexte reçu : la séance importée (données extraites), la séance prévue c
 
 `validation_requise` est `true` uniquement en verdict rouge.
 
-Le champ analyse fait 2 phrases max (40 mots). Le champ message_coach fait 1-2 phrases max (30 mots). Pas de données chiffrées redondantes avec l'affichage app.
+Le champ "analyse" fait 2 phrases maximum (40 mots max). Pas de données chiffrées redondantes avec ce que l'app affiche déjà (zones %, EPOC, FC, distance). Va droit au point : ce qui va, ce qui dérive, quoi corriger.
 
 ### 10.2 — `bilan_hebdo`
 
@@ -238,7 +238,7 @@ Contexte reçu : toutes les séances de la semaine écoulée, le plan prévu, le
 ```json
 {
   "bilan": {
-    "resume": "4 à 6 phrases sur la semaine écoulée.",
+    "resume": "3 phrases max (50 mots) sur la semaine écoulée.",
     "volume_course_km": 42,
     "d_plus_m": 1100,
     "distribution_zones": {"z1_z2": 74, "z3": 14, "z4_z5": 12},
@@ -254,7 +254,7 @@ Contexte reçu : toutes les séances de la semaine écoulée, le plan prévu, le
     "decision": "Pas de rattrapage. On maintient la progression prévue, la sortie longue de samedi absorbe l'écart."
   },
   "semaine_suivante": {
-    "objectif": "Phrase d'objectif de la semaine.",
+    "objectif": "1 phrase d'objectif (15 mots max).",
     "seances": [
       {
         "jour": "lundi",
@@ -290,7 +290,9 @@ Contexte reçu : toutes les séances de la semaine écoulée, le plan prévu, le
 }
 ```
 
-Le champ analyse fait 2 phrases max (40 mots). Le champ message_coach fait 1-2 phrases max (30 mots). Pas de données chiffrées redondantes avec l'affichage app.
+Le champ "resume" du bilan fait 3 phrases maximum (50 mots max).
+Le champ "message_coach" fait 1 à 2 phrases maximum (30 mots max). Direct et actionnable.
+Le champ "objectif" de la semaine suivante fait 1 phrase (15 mots max).
 
 ### 10.3 — `reconstruction_evenements`
 
@@ -298,7 +300,7 @@ Contexte reçu : la liste complète des événements (existants + nouveau), le m
 
 ```json
 {
-  "analyse_conflits": "Description des conflits détectés entre événements, ou 'aucun'.",
+  "analyse_conflits": "1 à 2 phrases sur les conflits détectés entre événements, ou 'aucun'.",
   "mode_recommande": "BASE | RACE_PREP",
   "bascule_le": "2026-11-09 ou null",
   "plan_macro": [
@@ -338,11 +340,13 @@ Contexte reçu : la liste complète des événements (existants + nouveau), le m
       "phase_concernee": "BUILD"
     }
   ],
-  "message_coach": "1-2 phrases (30 mots max) sur la cohérence globale et le point d'attention principal."
+  "message_coach": "2 phrases max (40 mots) sur la cohérence globale et le point d'attention principal."
 }
 ```
 
-Le champ analyse fait 2 phrases max (40 mots). Le champ message_coach fait 1-2 phrases max (30 mots). Pas de données chiffrées redondantes avec l'affichage app.
+Le champ "analyse_conflits" fait 1 à 2 phrases maximum.
+Le champ "objectif" de chaque phase du plan_macro fait 1 phrase maximum (20 mots).
+Le champ "message_coach" fait 2 phrases maximum (40 mots max).
 
 Le champ `objectif` de chaque phase du `plan_macro` commence par les repères chiffrés hebdomadaires de la phase, au format exact « Volume X-Y km/sem · D+ X-Y m/sem · Squash N/sem. », puis la phrase d'objectif. L'application lit ces repères pour afficher le plan : ne change ni l'ordre, ni les libellés, ni les unités. Ces repères ne comptent pas dans la limite de longueur de l'objectif.
 
