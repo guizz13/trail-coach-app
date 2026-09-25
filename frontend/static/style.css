@@ -234,7 +234,7 @@ button.badge { border: 0; cursor: pointer; transition: background .2s ease; }
 label, .label-champ { display: block; font-size: 10px; color: var(--text-muted); text-transform: uppercase; font-weight: 600; letter-spacing: .6px; margin: 12px 0 5px; }
 input, select, textarea {
   width: 100%; background: var(--bg-surface); border: 0.5px solid var(--border); border-radius: var(--radius-sm);
-  padding: 8px 10px; min-height: 38px; font-size: 16px; /* 16px : pas de zoom auto sur iOS */
+  padding: 8px 10px; min-height: 38px; font-size: 16px; /* 16 px partout : en dessous, iOS zoome au focus */
   -webkit-appearance: none; appearance: none;
 }
 select { background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
@@ -251,11 +251,11 @@ input[type=checkbox]:checked::after { content: ""; width: 10px; height: 6px; bor
 input[type=range] { padding: 0; min-height: 28px; background: none; border: 0; }
 input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: var(--bg-surface); }
 input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; margin-top: -9px; border-radius: 50%; background: var(--accent); }
-input[type=file] { padding: 6px; font-size: 13px; }
+input[type=file] { padding: 6px; font-size: 16px; }
 .coche { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-primary); cursor: pointer; text-transform: none; letter-spacing: 0; font-weight: 400; margin: 0; }
 .champs-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 8px; }
 .champs-4 { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 6px; }
-.champs-4 input { font-size: 14px; padding: 8px 6px; }
+.champs-4 input { font-size: 16px; padding: 8px 6px; }
 
 .btn {
   display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%;
@@ -434,7 +434,7 @@ dialog.feuille::backdrop { background: rgba(0, 0, 0, .6); }
 .choix-importance button.actif { border-color: var(--accent); color: var(--accent-light); }
 /* 16 px et non 14 : en dessous, Safari iOS zoome sur le champ au focus */
 .modale input, .modale select, .modale textarea { border-radius: 10px; padding: 12px 14px; font-size: 16px; }
-.modale input[type=file] { padding: 10px; font-size: 13px; }
+.modale input[type=file] { padding: 10px; font-size: 16px; }
 .btn.modale-valider { border-radius: 12px; padding: 14px; font-weight: 600; margin-top: 18px; }
 
 /* ---- Semaine : objectif dans les 28 jours ---------------------------------------------------- */
