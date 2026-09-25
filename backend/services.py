@@ -351,3 +351,200 @@ def importer_et_analyser(fichier_bytes: bytes, nom: str, muscu_detail: Optional[
 def _seance_publique(s: dict) -> dict:
     """Séance sans le JSON brut (volumineux et redondant)."""
     return {k: v for k, v in s.items() if k != "donnees_brutes"}
+
+
+# ---------------------------------------------------------------------------
+# Dashboard
+# ---------------------------------------------------------------------------
+def marquer_manquees(avant: date) -> None:
+    """Séances prévues d'un jour passé et jamais réalisées → 'manque'."""
+    with db.connexion() as c:
+        c.execute(
+            "UPDATE seances_planifiees SET statut = 'manque' "
+            "WHERE date_seance < ? AND statut IN ('prevu', 'modifie') "
+            "AND seance_realisee_id IS NULL AND type <> 'repos'",
+            (avant.isoformat(),),
+        )
+
+
+def semaine(lundi: date) -> list[dict]:
+    """7 jours avec séances planifiées et réalisées."""
+    dimanche = lundi + timedelta(days=6)
+    plan = db.planifiees_entre(lundi.isoformat(), dimanche.isoformat())
+    faites = [_seance_publique(s) for s in db.seances_entre(lundi.isoformat(), dimanche.isoformat())]
+    liees = {p["seance_realisee_id"] for p in plan if p["seance_realisee_id"]}
+    jours = []
+    for i in range(7):
+        d = (lundi + timedelta(days=i)).isoformat()
+        jours.append({
+            "date": d,
+            "jour": JOURS[i],
+            "planifiees": [p for p in plan if p["date_seance"] == d],
+            "realisees_hors_plan": [s for s in faites if s["date_debut"][:10] == d and s["id"] not in liees],
+        })
+    return jours
+
+
+def phase_active(d: date) -> Optional[dict]:
+    iso = d.isoformat()
+    for p in db.plan_prepa():
+        if p["du"] <= iso <= p["au"]:
+            return p
+    return None
+
+
+def prochain_evenement_a(d: date) -> Optional[dict]:
+    for e in db.evenements(depuis=d.isoformat()):
+        if e["priorite"] == "A":
+            return {**e, "dans_jours": (date.fromisoformat(e["date_evt"]) - d).days}
+    return None
+
+
+def cout_llm_mois() -> dict:
+    import llm_client
+    u = llm_client.cout_du_mois()
+    return {"mois": u.mois, "cout_usd": round(u.cout_usd, 4), "nb_appels": u.nb_appels,
+            "plafond_usd": llm_client.PLAFOND_MENSUEL_USD}
+
+
+def tableau_de_bord(d: Optional[date] = None) -> dict:
+    d = d or aujourdhui()
+    lundi = lundi_de(d)
+    marquer_manquees(d)
+    seances_sem = db.seances_entre(lundi.isoformat(), (lundi + timedelta(days=6)).isoformat())
+    derniere = db.derniere_analyse()
+    return {
+        "aujourdhui": d.isoformat(),
+        "lundi": lundi.isoformat(),
+        "profil": db.profil(),
+        "phase": phase_active(d),
+        "prochain_a": prochain_evenement_a(d),
+        "semaine": semaine(lundi),
+        "acwr": acwr_dict(acwr_au(d)),
+        "distribution": distribution_semaine(lundi),
+        "charge_semaine": round(metrics.charge_semaine(seances_sem), 1),
+        "derniere_analyse": derniere,
+        "cout_llm": cout_llm_mois(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Historique
+# ---------------------------------------------------------------------------
+def historique(famille: Optional[str] = None, du: Optional[str] = None,
+               au: Optional[str] = None) -> list[dict]:
+    du = du or "0000-01-01"
+    au = au or "9999-12-31"
+    familles = extractor.FAMILLE_COURSE if famille == "course" else None
+    rows = db.seances_entre(du, au, famille=None if familles else famille, familles=familles)
+    return [_seance_publique(s) for s in reversed(rows)]
+
+
+def detail_seance(id_: int) -> Optional[dict]:
+    s = db.seance(id_)
+    if not s:
+        return None
+    return {
+        "seance": _seance_publique(s),
+        "muscu_detail": db.muscu_detail(id_),
+        "analyses": db.analyses_seance(id_),
+        "prevu": db.fetch_one("SELECT * FROM seances_planifiees WHERE seance_realisee_id = ?", (id_,)),
+    }
+
+
+def graphiques(nb_semaines: int = 12, d: Optional[date] = None) -> dict:
+    d = d or aujourdhui()
+    lundi_courant = lundi_de(d)
+    semaines = []
+    for i in range(nb_semaines - 1, -1, -1):
+        lundi = lundi_courant - timedelta(weeks=i)
+        dimanche = lundi + timedelta(days=6)
+        course = db.seances_entre(lundi.isoformat(), dimanche.isoformat(), familles=extractor.FAMILLE_COURSE)
+        toutes = db.seances_entre(lundi.isoformat(), dimanche.isoformat())
+        a = acwr_au(min(dimanche, d))
+        semaines.append({
+            "lundi": lundi.isoformat(),
+            "km": round(sum(s["distance_km"] or 0 for s in course), 1),
+            "dplus": round(sum(s["dplus_m"] or 0 for s in course)),
+            "charge": round(metrics.charge_semaine(toutes), 1),
+            "acwr": a.ratio,
+        })
+    return {"semaines": semaines, "poids": db.poids_liste()}
+
+
+def charges_muscu() -> dict:
+    """{exercice: [{date, kg, reps, series}]} trié par date."""
+    rows = db.fetch_all(
+        "SELECT m.charges, m.split, s.date_debut FROM muscu_detail m "
+        "JOIN seances_realisees s ON s.id = m.seance_id ORDER BY s.date_debut"
+    )
+    par_exo: dict[str, list] = {}
+    for r in rows:
+        for c in r["charges"] or []:
+            par_exo.setdefault(c["exo"].strip().lower(), []).append(
+                {"date": r["date_debut"][:10], "split": r["split"], **c})
+    return par_exo
+
+
+# ---------------------------------------------------------------------------
+# Événements (CRUD) — la reconstruction LLM est déclenchée par l'appelant
+# ---------------------------------------------------------------------------
+TYPES_EVENEMENT = ("trail_race", "squash_competition", "other")
+
+
+def valider_evenement(e: dict) -> dict:
+    if e.get("type") not in TYPES_EVENEMENT:
+        raise ValueError(f"Type d'événement invalide : {e.get('type')}")
+    if e.get("priorite", "B") not in ("A", "B", "C"):
+        raise ValueError("Priorité invalide (A, B ou C).")
+    titre = (e.get("titre") or "").strip()
+    if not titre:
+        raise ValueError("Titre obligatoire.")
+    try:
+        date.fromisoformat(e.get("date_evt") or "")
+    except ValueError:
+        raise ValueError("Date invalide (AAAA-MM-JJ).")
+    return {
+        "type": e["type"], "titre": titre, "date_evt": e["date_evt"],
+        "priorite": e.get("priorite", "B"),
+        "distance_km": _nombre(e.get("distance_km")), "dplus_m": _nombre(e.get("dplus_m")),
+        "notes": (e.get("notes") or "").strip() or None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Séances planifiées (édition manuelle)
+# ---------------------------------------------------------------------------
+CRENEAUX = ("matin", "midi", "soir", "journee")
+STATUTS = ("prevu", "realise", "manque", "modifie")
+
+
+def normaliser_creneau(c: Optional[str]) -> str:
+    """Le schéma n'accepte que 4 créneaux ; tout le reste (week-end, après-midi…) → journee."""
+    c = (c or "").lower().replace("é", "e").strip()
+    return c if c in CRENEAUX else "journee"
+
+
+def valider_planifiee(p: dict) -> dict:
+    try:
+        date.fromisoformat(p.get("date_seance") or "")
+    except ValueError:
+        raise ValueError("Date de séance invalide (AAAA-MM-JJ).")
+    type_ = (p.get("type") or "").strip()
+    if not type_:
+        raise ValueError("Type de séance obligatoire.")
+    out = {
+        "date_seance": p["date_seance"],
+        "creneau": normaliser_creneau(p.get("creneau")),
+        "type": type_,
+        "detail": (p.get("detail") or "").strip() or None,
+        "intensite": (p.get("intensite") or "").strip() or None,
+        "duree_min": _nombre(p.get("duree_min")),
+        "distance_km": _nombre(p.get("distance_km")),
+        "dplus_m": _nombre(p.get("dplus_m")),
+    }
+    if p.get("statut"):
+        if p["statut"] not in STATUTS:
+            raise ValueError("Statut invalide.")
+        out["statut"] = p["statut"]
+    return out
