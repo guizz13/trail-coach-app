@@ -154,78 +154,86 @@ function rendreAutres() {
     b.className = "objectif-ligne";
     b.innerHTML = `<span class="type-carre ${esc(e.type)}"><i class="ti ${ICONES_EVT[e.type] || ICONES_EVT.other}"></i></span>
       <div class="seance-corps"><div class="seance-type">${esc(e.titre)}</div>
-        <div class="seance-detail">${esc(dateFR(e.date_evt, { weekday: "short", day: "numeric", month: "short", year: "numeric" }))} · J-${joursEntre(aujourdhui, e.date_evt)}</div></div>
+        <div class="seance-detail">${esc(dateFR(e.date_evt, { weekday: "short", day: "numeric", month: "short", year: "numeric" }))} · J-${joursEntre(aujourdhui, e.date_evt)}${lieuDe(e) ? " · " + esc(lieuDe(e)) : ""}</div></div>
       ${e.type === "trail_race" ? `<span class="badge ${CLASSE_PRIORITE[e.priorite]}">${esc(PRIORITES[e.priorite])}</span>` : ""}`;
     b.onclick = () => ouvrirModale(e);
     el.appendChild(b);
   }
 }
 
-// ---- Formulaire (ajout et modification) ------------------------------------------------
-function champsHTML(e = {}) {
-  const opt = (o, v) => Object.entries(o).map(([k, l]) => `<option value="${k}" ${k === v ? "selected" : ""}>${esc(l)}</option>`).join("");
-  return `<label style="margin-top:0">Type</label><select name="type">${opt(TYPES_EVT, e.type || "trail_race")}</select>
-    <div class="champ-importance"><label>Importance</label><select name="priorite">${opt(PRIORITES, e.priorite || "B")}</select></div>
-    <label>Nom</label><input name="titre" value="${esc(e.titre || "")}" required>
-    <label>Date</label><input type="date" name="date_evt" value="${esc(e.date_evt || "")}" required>
-    <div class="champs-2 champ-course">
-      <div><label>Distance (km)</label><input name="distance_km" inputmode="decimal" value="${esc(e.distance_km ?? "")}"></div>
-      <div><label>D+ (m)</label><input name="dplus_m" inputmode="numeric" value="${esc(e.dplus_m ?? "")}"></div>
-    </div>
-    <label>Notes</label><textarea name="notes">${esc(e.notes || "")}</textarea>
-    <div class="champ-course"><label>Trace GPX (optionnel)</label><input type="file" name="gpx" accept=".gpx,application/gpx+xml">
-    <div class="sous-texte gpx-info">Distance et D+ sont remplis depuis la trace. Le profil reste sur cet appareil.</div></div>`;
-}
+// ---- Modale d'ajout / de modification ---------------------------------------------------------
+const TYPES_MODALE = [["trail_race", "Trail", "ti-run"], ["squash_competition", "Squash", "ti-ball-tennis"], ["other", "Autre", "ti-calendar-event"]];
 
-// Champs selon le type : distance/D+/GPX pour un trail seulement, importance masquée en squash
-const avecDistance = type => type === "trail_race";
-const avecImportance = type => type !== "squash_competition";
-function brancherType(f) {
-  const sel = f.elements.namedItem("type");
+// Le lieu d'une compétition squash n'a pas de colonne en base : il est rangé en tête des notes
+const RE_LIEU = /^Lieu : (.*)(?:\n|$)/;
+function separerLieu(notes) {
+  const m = (notes || "").match(RE_LIEU);
+  return m ? { lieu: m[1], notes: notes.slice(m[0].length) } : { lieu: "", notes: notes || "" };
+}
+const lieuDe = e => separerLieu(e.notes).lieu;
+
+function ouvrirModale(e) {
+  const init = e ? separerLieu(e.notes) : { lieu: "", notes: "" };
+  const etatM = { type: e ? e.type : "trail_race", priorite: e ? e.priorite : "B", profil: null };
+  const d = feuille(`
+    <div class="ligne entre modale-tete"><h2>${e ? "Modifier l'objectif" : "Nouvel objectif"}</h2>
+      <button type="button" class="btn-icone" data-fermer aria-label="Fermer"><i class="ti ti-x"></i></button></div>
+    <form class="modale">
+      <div class="choix-type">${TYPES_MODALE.map(([v, l, i]) => `<button type="button" data-type="${v}"><i class="ti ${i}"></i>${l}</button>`).join("")}</div>
+      <div data-importance><label>Importance</label>
+        <div class="choix-importance">${Object.entries(PRIORITES).map(([v, l]) => `<button type="button" data-prio="${v}">${esc(l)}</button>`).join("")}</div></div>
+      <label>Nom</label><input name="titre" value="${esc(e ? e.titre : "")}" required>
+      <label>Date</label><input type="date" name="date_evt" value="${esc(e ? e.date_evt : "")}" required>
+      <div class="champs-2" data-trail>
+        <div><label>Distance (km)</label><input name="distance_km" inputmode="decimal" value="${esc(e?.distance_km ?? "")}"></div>
+        <div><label>D+ (m)</label><input name="dplus_m" inputmode="numeric" value="${esc(e?.dplus_m ?? "")}"></div>
+      </div>
+      <div data-trail><label>Trace GPX (optionnel)</label><input type="file" name="gpx" accept=".gpx,application/gpx+xml">
+        <div class="sous-texte gpx-info">Distance et D+ sont remplis depuis la trace. Le profil reste sur cet appareil.</div></div>
+      <div data-squash><label>Lieu</label><input name="lieu" value="${esc(init.lieu)}" placeholder="club, ville…"></div>
+      <label>Notes</label><textarea name="notes">${esc(init.notes)}</textarea>
+      <button type="submit" class="btn principal modale-valider">${e ? "Enregistrer" : "Ajouter cet objectif"}</button>
+      ${e ? `<button type="button" class="btn danger" data-suppr style="margin-top:8px">Supprimer</button>` : ""}
+    </form>`);
+  const f = $("form", d);
+
+  // Champs selon le type : importance, distance, D+ et GPX pour un trail seulement ; lieu pour le squash
   const adapter = () => {
-    $$(".champ-course", f).forEach(x => x.classList.toggle("hidden", !avecDistance(sel.value)));
-    $(".champ-importance", f).classList.toggle("hidden", !avecImportance(sel.value));
+    $$("[data-type]", d).forEach(b => b.classList.toggle("actif", b.dataset.type === etatM.type));
+    $$("[data-prio]", d).forEach(b => b.classList.toggle("actif", b.dataset.prio === etatM.priorite));
+    $("[data-importance]", d).classList.toggle("hidden", etatM.type !== "trail_race");
+    $$("[data-trail]", d).forEach(x => x.classList.toggle("hidden", etatM.type !== "trail_race"));
+    $("[data-squash]", d).classList.toggle("hidden", etatM.type !== "squash_competition");
   };
-  sel.addEventListener("change", adapter);
+  $$("[data-type]", d).forEach(b => { b.onclick = () => { etatM.type = b.dataset.type; adapter(); }; });
+  $$("[data-prio]", d).forEach(b => { b.onclick = () => { etatM.priorite = b.dataset.prio; adapter(); }; });
   adapter();
-}
 
-// Lecture du GPX choisi : pré-remplit distance et D+, garde le profil en attente
-function brancherGPX(f) {
-  let profil = null;
   f.gpx.onchange = async () => {
     try {
       const t = lireGPX(await f.gpx.files[0].text());
       f.distance_km.value = t.distance_km;
       f.dplus_m.value = t.dplus_m;
-      profil = t.profil;
+      etatM.profil = t.profil;
       $(".gpx-info", f).textContent = `Trace lue : ${nb(t.distance_km, 1)} km, ${nb(t.dplus_m)} m D+.`;
     } catch (err) { $(".gpx-info", f).textContent = err.message; }
   };
-  return () => profil;
-}
 
-function valeurs(f) {
-  const v = Object.fromEntries(new FormData(f));
-  delete v.gpx;
-  // Un champ masqué ne doit pas envoyer une valeur saisie avant le changement de type
-  if (!avecDistance(v.type)) { v.distance_km = ""; v.dplus_m = ""; }
-  return v;
-}
-
-// Ajout (e absent) ou modification d'un objectif
-function ouvrirModale(e) {
-  const d = feuille(`<h2>${e ? esc(e.titre) : "Nouvel objectif"}</h2><form>${champsHTML(e || {})}
-    <div class="boutons">${e ? `<button type="button" class="btn danger" data-suppr>Supprimer</button>` : ""}
-      <button type="submit" class="btn principal">${e ? "Enregistrer" : "Ajouter cet objectif"}</button></div></form>`);
-  const f = $("form", d);
-  brancherType(f);
-  const profil = brancherGPX(f);
+  $("[data-fermer]", d).onclick = () => d.close();
   f.onsubmit = ev => {
     ev.preventDefault();
+    const trail = etatM.type === "trail_race";
+    const lieu = f.lieu.value.trim();
+    const notes = f.notes.value.trim();
+    const v = {
+      type: etatM.type, titre: f.titre.value, date_evt: f.date_evt.value,
+      // Squash et autre : pas d'importance dans le formulaire, le backend applique sa valeur par défaut
+      ...(trail ? { priorite: etatM.priorite, distance_km: f.distance_km.value, dplus_m: f.dplus_m.value } : {}),
+      notes: etatM.type === "squash_competition" && lieu ? `Lieu : ${lieu}\n${notes}` : notes,
+    };
     d.close();
-    const req = e ? api("PUT", `/api/evenements/${e.id}`, valeurs(f)) : api("POST", "/api/evenements", valeurs(f));
-    executer(req, r => { if (profil()) stockage.ecrire("gpx:" + (e ? e.id : r.evenement.id), profil()); });
+    const req = e ? api("PUT", `/api/evenements/${e.id}`, v) : api("POST", "/api/evenements", v);
+    executer(req, r => { if (trail && etatM.profil) stockage.ecrire("gpx:" + (e ? e.id : r.evenement.id), etatM.profil); });
   };
   const sup = $("[data-suppr]", d);
   if (sup) sup.onclick = () => {

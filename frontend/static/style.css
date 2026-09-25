@@ -324,10 +324,10 @@ td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
 /* ---- Feuille (bottom sheet) -------------------------------------------------------- */
 dialog.feuille {
   margin: auto 0 0; width: 100%; max-width: 100%; max-height: 88vh; border: 0; padding: 18px 16px calc(24px + env(safe-area-inset-bottom));
-  background: var(--bg-card); color: var(--text-primary); border-radius: 18px 18px 0 0; overflow-y: auto;
+  background: var(--bg-card); color: var(--text-primary); border-radius: 20px 20px 0 0; overflow-y: auto;
 }
 dialog.feuille::backdrop { background: rgba(0, 0, 0, .6); }
-.poignee { width: 36px; height: 4px; border-radius: 2px; background: var(--bg-surface); margin: -8px auto 12px; }
+.poignee { width: 36px; height: 4px; border-radius: 2px; background: var(--bg-surface); margin: -8px auto 16px; }
 .feuille h2 { font-size: 17px; margin: 0 0 4px; }
 
 .cout { text-align: center; font-size: 10px; color: var(--text-muted); margin-top: 20px; }
@@ -384,3 +384,21 @@ dialog.feuille::backdrop { background: rgba(0, 0, 0, .6); }
 }
 .fab:active { opacity: .85; }
 .phase-donnees span { white-space: nowrap; }
+
+/* ---- Modale objectif ---------------------------------------------------------------------- */
+.modale-tete h2 { font-size: 18px; font-weight: 700; margin: 0; }
+.choix-type { display: flex; gap: 8px; margin-top: 14px; }
+.choix-type button, .choix-importance button {
+  flex: 1; border-radius: 10px; padding: 10px 6px; font-size: 13px; font-weight: 600; cursor: pointer;
+  background: var(--bg-surface); color: var(--text-secondary); border: 1px solid transparent; transition: background .2s ease, color .2s ease;
+}
+.choix-type button { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.choix-type button i { font-size: 20px; }
+.choix-type button.actif { background: var(--accent); color: #fff; }
+.choix-importance { display: flex; gap: 6px; }
+.choix-importance button { font-size: 12px; padding: 10px 4px; }
+.choix-importance button.actif { border-color: var(--accent); color: var(--accent); }
+/* 16 px et non 14 : en dessous, Safari iOS zoome sur le champ au focus */
+.modale input, .modale select, .modale textarea { border-radius: 10px; padding: 12px 14px; font-size: 16px; }
+.modale input[type=file] { padding: 10px; font-size: 13px; }
+.btn.modale-valider { border-radius: 12px; padding: 14px; font-weight: 600; margin-top: 18px; }
