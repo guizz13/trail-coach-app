@@ -60,7 +60,7 @@ body {
 }
 main { padding: 0 16px 96px; max-width: 480px; margin: 0 auto; }
 button, input, select, textarea { font: inherit; color: inherit; }
-a { color: var(--accent); text-decoration: none; }
+a { color: var(--accent-light); text-decoration: none; }
 .hidden { display: none !important; }
 .muted { color: var(--text-muted); }
 .secondaire { color: var(--text-secondary); }
@@ -71,6 +71,8 @@ a { color: var(--accent); text-decoration: none; }
 .wrap { flex-wrap: wrap; }
 .pile > * + * { margin-top: 8px; }
 
+/* Violet en texte : --accent-light (#A78BFA, ≥ 6:1 sur les cartes). --accent (#8B5CF6, 3,8:1)
+   reste réservé aux aplats, traits et icônes. */
 /* ---- Top bar --------------------------------------------------------------- */
 .topbar { display: flex; align-items: center; justify-content: space-between; height: 52px; }
 .logo-box {
@@ -136,7 +138,7 @@ h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; margin: 6px 0 14
   letter-spacing: .6px; padding: 5px 10px; border-radius: var(--radius-sm); white-space: nowrap;
   background: var(--bg-surface); color: var(--text-secondary);
 }
-.badge.accent { background: var(--accent-dim); color: var(--accent); }
+.badge.accent { background: var(--accent-dim); color: var(--accent-light); }
 .badge.prepa { background: var(--accent-dim); color: var(--accent-light); }
 .badge.orange { background: var(--orange-dim); color: var(--orange); }
 .badge.vert { background: var(--green-dim); color: var(--green); }
@@ -155,7 +157,7 @@ button.badge { border: 0; cursor: pointer; transition: background .2s ease; }
 .jour.aujourdhui { border: 1px solid rgba(139, 92, 246, 0.35); background: var(--bg-card-hover); }
 .jour-titre { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); font-weight: 600; margin-bottom: 8px; }
 .jour-titre b { color: var(--text-secondary); text-transform: capitalize; }
-.jour.aujourdhui .jour-titre b { color: var(--accent); }
+.jour.aujourdhui .jour-titre b { color: var(--accent-light); }
 .jour-vide { font-size: 11px; color: var(--text-muted); }
 .seance { display: flex; align-items: center; gap: 10px; width: 100%; background: none; border: 0; padding: 0; text-align: left; cursor: pointer; }
 .seance + .seance { margin-top: 10px; }
@@ -191,7 +193,7 @@ button.badge { border: 0; cursor: pointer; transition: background .2s ease; }
   background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
   border-left: 3px solid var(--accent); border-radius: 12px; padding: 14px 16px; margin: 12px 0 0;
 }
-.coach .titre { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--accent); font-weight: 600; margin-bottom: 6px; }
+.coach .titre { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--accent-light); font-weight: 600; margin-bottom: 6px; }
 .coach p { margin: 0; font-size: 13px; line-height: 1.5; color: #C8C8CC; }
 .coach p + p { margin-top: 8px; }
 
@@ -273,7 +275,7 @@ input[type=file] { padding: 6px; font-size: 13px; }
 .segments { display: flex; flex-wrap: wrap; gap: 6px; }
 .segments button { border: 0.5px solid var(--border); background: transparent; color: var(--text-secondary); border-radius: var(--radius-sm);
   padding: 7px 10px; font-size: 12px; font-weight: 600; cursor: pointer; transition: background .2s ease, color .2s ease; }
-.segments button.actif { background: var(--accent-dim); color: var(--accent); border-color: var(--accent-dim); }
+.segments button.actif { background: var(--accent-dim); color: var(--accent-light); border-color: var(--accent-dim); }
 
 /* ---- Bandeaux ----------------------------------------------------------------------- */
 .bandeau { border-radius: var(--radius-sm); padding: 10px 12px; font-size: 12px; margin-top: 10px; }
@@ -306,7 +308,7 @@ input[type=file] { padding: 6px; font-size: 13px; }
 .verdict-carte .corps p { margin: 0 0 8px; line-height: 1.5; color: #C8C8CC; }
 .ajustement { border-top: 0.5px solid var(--border); padding: 8px 0; font-size: 12px; }
 .ajustement .fleche { color: var(--text-muted); }
-details summary { cursor: pointer; font-size: 12px; color: var(--accent); list-style: none; margin-top: 12px; }
+details summary { cursor: pointer; font-size: 12px; color: var(--accent-light); list-style: none; margin-top: 12px; }
 details summary::-webkit-details-marker { display: none; }
 
 /* ---- Erreurs ------------------------------------------------------------------ */
@@ -323,7 +325,7 @@ pre.brut { white-space: pre-wrap; word-break: break-word; background: rgba(0,0,0
 
 /* ---- Timeline objectifs ---------------------------------------------------------- */
 .tl-mois { display: grid; font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; margin-bottom: 8px; }
-.tl-mois .courant { color: var(--accent); }
+.tl-mois .courant { color: var(--accent-light); }
 .tl-barre { position: relative; height: 32px; background: var(--bg-surface); border-radius: 6px; }
 .tl-phase { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; overflow: hidden; white-space: nowrap; }
 .tl-phase.libre { background: rgba(139, 92, 246, .15); color: var(--accent-light); }
@@ -367,7 +369,7 @@ dialog.feuille::backdrop { background: rgba(0, 0, 0, .6); }
 /* ---- Texte replié sur 2 lignes (messages du coach, analyses) --------------------------- */
 .repliable .texte { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .repliable.deplie .texte { display: block; -webkit-line-clamp: unset; }
-.voir-plus { background: none; border: 0; padding: 4px 0 0; color: var(--accent); font-size: 11px; font-weight: 600; cursor: pointer; }
+.voir-plus { background: none; border: 0; padding: 4px 0 0; color: var(--accent-light); font-size: 11px; font-weight: 600; cursor: pointer; }
 .repliable { margin-bottom: 8px; }
 .repliable p.texte { margin: 0; }
 .coach .repliable { margin-bottom: 0; }
@@ -391,6 +393,7 @@ dialog.feuille::backdrop { background: rgba(0, 0, 0, .6); }
 .phase-details { background: none; border: 0; padding: 6px 0 0; font-size: 10px; color: var(--text-muted); cursor: pointer; }
 .phase-texte { font-size: 11px; color: var(--text-secondary); margin-top: 6px; line-height: 1.45; }
 .BASE-c { --c: var(--accent); --c-dim: var(--accent-dim); }
+.phase-carte.BASE-c .badge { color: var(--accent-light); }
 .BUILD-c { --c: var(--orange); --c-dim: var(--orange-dim); }
 .PIC-c { --c: var(--phase-pic); --c-dim: var(--phase-pic-dim); }
 .AFFUTAGE-c { --c: var(--green); --c-dim: var(--green-dim); }
@@ -428,7 +431,7 @@ dialog.feuille::backdrop { background: rgba(0, 0, 0, .6); }
 .choix-type button.actif { background: var(--accent); color: #fff; }
 .choix-importance { display: flex; gap: 6px; }
 .choix-importance button { font-size: 12px; padding: 10px 4px; }
-.choix-importance button.actif { border-color: var(--accent); color: var(--accent); }
+.choix-importance button.actif { border-color: var(--accent); color: var(--accent-light); }
 /* 16 px et non 14 : en dessous, Safari iOS zoome sur le champ au focus */
 .modale input, .modale select, .modale textarea { border-radius: 10px; padding: 12px 14px; font-size: 16px; }
 .modale input[type=file] { padding: 10px; font-size: 13px; }
