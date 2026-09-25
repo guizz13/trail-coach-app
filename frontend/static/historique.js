@@ -184,5 +184,22 @@ async function ouvrir(id) {
   } catch (e) { erreurSimple(d, e); }
 }
 
+// ---- Recalcul des verdicts (logique de seuils actuelle, sans appel au coach) -------------------------
+$("#recalculer").onclick = async () => {
+  if (!confirm("Recalculer le verdict de toutes les séances avec les seuils actuels ? Le texte des analyses ne change pas.")) return;
+  const b = $("#recalculer"), zone = $("#recalcul-resultat");
+  b.disabled = true;
+  zone.textContent = "Recalcul en cours…";
+  try {
+    const r = await api("POST", "/api/admin/recalculate");
+    const n = r.changements.length;
+    zone.textContent = `${r.analyses_mises_a_jour} analyse(s) recalculée(s), ${n} verdict(s) modifié(s)`
+      + (r.seances_sans_analyse ? ` · ${r.seances_sans_analyse} séance(s) sans analyse` : "") + ".";
+    Object.keys(verdicts).forEach(k => delete verdicts[k]);   // relecture des verdicts à jour
+    rendreListe();
+  } catch (e) { erreurSimple(zone, e); }
+  finally { b.disabled = false; }
+};
+
 charger().then(() => { if (location.hash.slice(1)) ouvrir(Number(location.hash.slice(1))); }).catch(e => erreurSimple($("#liste"), e));
 chargerMuscu().catch(e => erreurSimple($("#muscu"), e));

@@ -280,6 +280,12 @@ def api_import(fichier: UploadFile = File(...), options: str = Form("{}")):
     )
 
 
+# Protégée comme toute l'API par la session (COACH_PASSWORD) : voir _authentification
+@app.post("/api/admin/recalculate")
+def api_admin_recalculer():
+    return services.recalculer_verdicts()
+
+
 @app.post("/api/analyses/{id_}/decision")
 def api_decision(id_: int, corps: dict = Body(...)):
     return services.decider_ajustements(id_, bool(corps.get("accepter")))

@@ -191,3 +191,13 @@ def test_dimanche_et_bilan_sans_llm(client):
     assert r["reponse"] is None and r["erreur_llm"]
     assert client.post("/api/bilan", json={"ressenti": 12}).status_code == 422
     assert client.post("/api/bilan/999/valider", json={}).status_code == 422
+
+
+def test_recalcul_protege(anonyme):
+    assert anonyme.post("/api/admin/recalculate").status_code == 401
+
+
+def test_recalcul_via_api(client):
+    r = client.post("/api/admin/recalculate")
+    assert r.status_code == 200
+    assert r.json() == {"seances": 0, "analyses_mises_a_jour": 0, "seances_sans_analyse": 0, "changements": []}

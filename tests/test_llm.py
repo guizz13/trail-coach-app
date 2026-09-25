@@ -276,3 +276,30 @@ def test_reconstruction_echec_conserve_plan(monkeypatch):
     r = services.reconstruire()
     assert r["erreur_llm"]["type"] == "plafond"
     assert len(r["plan_prepa"]) == 2
+
+
+# ---- Recalcul des verdicts (sans appel LLM) ---------------------------------------
+def test_recalcul_des_verdicts(monkeypatch):
+    faux = brancher(monkeypatch, analyse_seance={**ANALYSE_ORANGE, "verdict": "rouge", "ajustements": [],
+                                                 "analyse": "Squash trop intense."})
+    squash = services.importer_et_analyser(lire("squash"), "s.json")
+    assert db.analyse(squash["analyse_id"])["verdict"] == "rouge"          # verdict du LLM, plus sévère
+    planifier("2026-09-15", "EF")
+    course = services.importer_et_analyser(lire("course_outdoor"), "o.json")
+    services.importer_et_analyser(lire("velo"), "v.json", analyser=False)
+    nb_appels = len(faux.appels)
+
+    r = services.recalculer_verdicts()
+    assert len(faux.appels) == nb_appels                                    # aucun appel LLM
+    assert (r["seances"], r["analyses_mises_a_jour"], r["seances_sans_analyse"]) == (3, 2, 1)
+
+    a = db.analyse(squash["analyse_id"])
+    assert a["verdict"] == "vert"                                           # squash : pas d'alerte de zones
+    assert a["reponse_json"]["analyse"] == "Squash trop intense."           # réponse du LLM conservée
+    assert a["reponse_json"]["recalcul"]["verdict"] == "vert"
+    assert {"seance_id": squash["seance"]["id"], "date": "2026-08-27", "famille": "squash",
+            "avant": "rouge", "apres": "vert"} in r["changements"]
+
+    c = db.analyse(course["analyse_id"])
+    assert c["verdict"] == "rouge"                                          # 65 % en Z3 sur EF prévue
+    assert "z3_sur_ef" in {s["nom"] for s in c["reponse_json"]["recalcul"]["signaux"]}

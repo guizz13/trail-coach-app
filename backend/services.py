@@ -384,6 +384,40 @@ def importer_et_analyser(fichier_bytes: bytes, nom: str, muscu_detail: Optional[
     }
 
 
+# ---------------------------------------------------------------------------
+# Recalcul des verdicts (sans appel LLM)
+# ---------------------------------------------------------------------------
+def recalculer_verdicts() -> dict:
+    """Réévalue chaque séance réalisée avec la logique actuelle de metrics (ACWR, seuils)
+    et met à jour le verdict de ses analyses. La réponse du LLM est conservée telle quelle ;
+    le verdict et les signaux recalculés sont ajoutés sous la clé « recalcul »."""
+    seances = db.fetch_all("SELECT * FROM seances_realisees ORDER BY date_debut")
+    horodatage = maintenant().isoformat(timespec="seconds")
+    changements, nb_analyses, sans_analyse = [], 0, 0
+    with db.connexion() as c:
+        for s in seances:
+            prevu = db.fetch_one("SELECT * FROM seances_planifiees WHERE seance_realisee_id = ?", (s["id"],))
+            prevu_eval = {"type": prevu["type"], "distance_km": prevu["distance_km"],
+                          "duree_min": prevu["duree_min"]} if prevu else None
+            acwr = acwr_au(date_de(s["date_debut"]))
+            verdict, signaux = metrics.evaluer_seance(s, prevu_eval, acwr, _prochaine_qualite_dans_h(s))
+            analyses = [a for a in db.analyses_seance(s["id"]) if a["type_appel"] == "analyse_seance"]
+            if not analyses:
+                sans_analyse += 1
+                continue
+            for a in analyses:
+                rep = a["reponse_json"] if isinstance(a["reponse_json"], dict) else {}
+                rep["recalcul"] = {"verdict": verdict, "signaux": [asdict(x) for x in signaux],
+                                   "acwr": acwr_dict(acwr), "le": horodatage}
+                db.maj("analyses_llm", a["id"], {"verdict": verdict, "reponse_json": rep}, conn=c)
+                nb_analyses += 1
+                if a["verdict"] != verdict:
+                    changements.append({"seance_id": s["id"], "date": s["date_debut"][:10], "famille": s["famille"],
+                                        "avant": a["verdict"], "apres": verdict})
+    return {"seances": len(seances), "analyses_mises_a_jour": nb_analyses,
+            "seances_sans_analyse": sans_analyse, "changements": changements}
+
+
 def _seance_publique(s: dict) -> dict:
     """Séance sans le JSON brut (volumineux et redondant)."""
     return {k: v for k, v in s.items() if k != "donnees_brutes"}
