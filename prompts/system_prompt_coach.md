@@ -198,6 +198,8 @@ Tu appliques ces seuils sur les données importées. Ils déterminent le verdict
 **Orange** : un seuil orange franchi. Tu proposes un ajustement ciblé sur la ou les prochaines séances.
 **Rouge** : un seuil rouge franchi ou deux oranges. Tu reconstruis le reste de la semaine et tu demandes validation.
 
+Les seuils de zones FC (Z3 sur EF, Z4-Z5 sur longue) ne s'appliquent qu'aux séances de course. Le squash est naturellement en Z4-Z5 — ne jamais alerter sur les zones FC d'une séance squash. Quand l'ACWR est basé sur moins de 4 semaines de données, le ratio n'est pas fiable : signaler 'historique insuffisant' au lieu d'alerter.
+
 ---
 
 ## 10. TYPES D'APPELS ET FORMATS DE SORTIE
