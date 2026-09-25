@@ -306,28 +306,28 @@ Contexte reçu : la liste complète des événements (existants + nouveau), le m
       "phase": "BASE",
       "du": "2026-11-09",
       "au": "2026-11-29",
-      "objectif": "Volume aérobie, 40-50 km/semaine, D+ modéré",
+      "objectif": "Volume 40-50 km/sem · D+ 800-1200 m/sem · Squash 1/sem. Volume aérobie, D+ modéré.",
       "sortie_longue_cible": "18-22 km / 800-1000 m"
     },
     {
       "phase": "BUILD",
       "du": "2026-11-30",
       "au": "2027-01-03",
-      "objectif": "Spécifique D+, montée progressive vers 28-32 km en sortie longue",
+      "objectif": "Volume 50-60 km/sem · D+ 1500-2000 m/sem · Squash 1/sem. Spécifique D+, sortie longue vers 28-32 km.",
       "sortie_longue_cible": "28-32 km / 1500-1800 m"
     },
     {
       "phase": "PIC",
       "du": "2027-01-04",
       "au": "2027-01-17",
-      "objectif": "Simulation course, séance de pointe",
+      "objectif": "Volume 55-65 km/sem · D+ 2000-2400 m/sem · Squash 0/sem. Simulation course, séance de pointe.",
       "sortie_longue_cible": "35 km / 2000 m"
     },
     {
       "phase": "AFFUTAGE",
       "du": "2027-01-18",
       "au": "2027-01-30",
-      "objectif": "Volume -50 %, intensité conservée, fraîcheur",
+      "objectif": "Volume 25-30 km/sem · D+ 600-900 m/sem · Squash 0/sem. Volume -50 %, intensité conservée.",
       "sortie_longue_cible": "15 km / 600 m puis rien"
     }
   ],
@@ -343,6 +343,8 @@ Contexte reçu : la liste complète des événements (existants + nouveau), le m
 ```
 
 Le champ analyse fait 2 phrases max (40 mots). Le champ message_coach fait 1-2 phrases max (30 mots). Pas de données chiffrées redondantes avec l'affichage app.
+
+Le champ `objectif` de chaque phase du `plan_macro` commence par les repères chiffrés hebdomadaires de la phase, au format exact « Volume X-Y km/sem · D+ X-Y m/sem · Squash N/sem. », puis la phrase d'objectif. L'application lit ces repères pour afficher le plan : ne change ni l'ordre, ni les libellés, ni les unités. Ces repères ne comptent pas dans la limite de longueur de l'objectif.
 
 ---
 

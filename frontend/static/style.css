@@ -29,6 +29,8 @@
   --muscu-dim: #1E1E23;
   --velo: #2DD4A0;
   --velo-dim: #0A2E22;
+  --purple: #9B6DFF;        /* alias du violet squash, utilisé par la phase PIC */
+  --purple-dim: #1A1030;
   /* Bordures et rayons */
   --border: #32323A;
   --radius: 14px;
@@ -338,3 +340,47 @@ dialog.feuille::backdrop { background: rgba(0, 0, 0, .6); }
 .repliable { margin-bottom: 8px; }
 .repliable p.texte { margin: 0; }
 .coach .repliable { margin-bottom: 0; }
+
+/* ---- Objectifs : carte principale ---------------------------------------------------- */
+.objectif-principal { border-left: 3px solid var(--orange); border-radius: 0 14px 14px 0; cursor: pointer; }
+.objectif-principal .nom { font-size: 18px; font-weight: 700; }
+.objectif-principal .date { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+.objectif-principal .compte { font-size: 28px; font-weight: 700; color: var(--orange); letter-spacing: -0.5px; line-height: 1; font-variant-numeric: tabular-nums; }
+.stats-grandes { display: flex; gap: 18px; margin-top: 12px; }
+.stats-grandes b { display: block; font-size: 20px; font-weight: 700; letter-spacing: -0.5px; font-variant-numeric: tabular-nums; }
+.stats-grandes span { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; }
+
+/* ---- Objectifs : plan de préparation en cartes compactes ------------------------------- */
+.phase-carte { display: flex; gap: 12px; background: var(--bg-card); border-radius: 14px; padding: 14px; }
+.phase-carte + .phase-carte { margin-top: 6px; }
+.phase-barre { width: 4px; border-radius: 2px; flex-shrink: 0; }
+.phase-corps { flex: 1; min-width: 0; }
+.phase-donnees { display: grid; grid-template-columns: max-content max-content; justify-content: space-between; gap: 4px 12px; margin-top: 8px; font-size: 11px; color: var(--text-secondary); }
+.phase-donnees b { font-weight: 600; color: var(--text-primary); }
+.phase-details { background: none; border: 0; padding: 6px 0 0; font-size: 10px; color: var(--text-muted); cursor: pointer; }
+.phase-texte { font-size: 11px; color: var(--text-secondary); margin-top: 6px; line-height: 1.45; }
+.BASE-c { --c: var(--accent); --c-dim: var(--accent-dim); }
+.BUILD-c { --c: var(--orange); --c-dim: var(--orange-dim); }
+.PIC-c { --c: var(--purple); --c-dim: var(--purple-dim); }
+.AFFUTAGE-c { --c: var(--green); --c-dim: var(--green-dim); }
+.phase-carte .phase-barre { background: var(--c); }
+.phase-carte .badge { background: var(--c-dim); color: var(--c); }
+.btn.secondaire-plan { border-radius: 12px; margin-top: 8px; }
+
+/* ---- Objectifs : liste compacte ---------------------------------------------------------- */
+.objectif-ligne { display: flex; align-items: center; gap: 10px; width: 100%; background: none; border: 0; padding: 10px 0; border-top: 0.5px solid var(--border); text-align: left; cursor: pointer; }
+.objectif-ligne:first-child { border-top: 0; }
+.type-carre { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; font-size: 17px; flex-shrink: 0; }
+.type-carre.trail_race { background: var(--orange-dim); color: var(--orange); }
+.type-carre.squash_competition { background: var(--purple-dim); color: var(--purple); }
+.type-carre.other { background: var(--bg-surface); color: var(--text-secondary); }
+
+/* ---- Bouton flottant -------------------------------------------------------------------- */
+/* fixed plutôt qu'absolute : le bouton reste au-dessus de la tab bar pendant le défilement */
+.fab {
+  position: fixed; bottom: calc(86px + env(safe-area-inset-bottom)); right: 20px; z-index: 10;
+  width: 52px; height: 52px; border-radius: 50%; border: 0; background: var(--accent); color: #fff;
+  display: grid; place-items: center; font-size: 24px; cursor: pointer; transition: opacity .2s ease;
+}
+.fab:active { opacity: .85; }
+.phase-donnees span { white-space: nowrap; }

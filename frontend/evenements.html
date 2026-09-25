@@ -21,16 +21,19 @@
   <div class="carte" style="padding:16px" id="timeline"></div>
   <div id="reconstruction"></div>
 
-  <div class="section-label">À venir</div>
-  <div id="liste"><div class="squelette"></div></div>
-
-  <div class="section-label">Ajouter un objectif</div>
-  <form class="carte" id="form"></form>
+  <div class="section-label">Objectif principal</div>
+  <div id="principal"><div class="squelette"></div></div>
 
   <div class="section-label">Plan de préparation</div>
-  <div class="carte" id="plan"></div>
-  <button type="button" class="btn" id="reconstruire" style="margin-top:8px"><i class="ti ti-refresh"></i>Reconstruire le plan</button>
+  <div id="plan"></div>
+  <button type="button" class="btn secondaire-plan" id="reconstruire"><i class="ti ti-refresh"></i>Reconstruire le plan</button>
+
+  <div id="bloc-autres" class="hidden">
+    <div class="section-label">Autres objectifs</div>
+    <div class="carte" id="autres" style="padding-top:4px;padding-bottom:4px"></div>
+  </div>
 </main>
+<button type="button" class="fab" id="ajouter" aria-label="Ajouter un objectif"><i class="ti ti-plus"></i></button>
 <script src="/static/app.js"></script>
 <script src="/static/evenements.js"></script>
 </body>
