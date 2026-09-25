@@ -36,15 +36,17 @@ MODELE_PAR_APPEL = {
 
 # Tarifs USD par million de tokens (à mettre à jour si Anthropic change)
 TARIFS = {
-    "claude-fable-5-1": {"input": 10.0, "output": 50.0, "cache_read": 1.0, "cache_write": 12.5},
+    "claude-fable-5-1": {"input": 10.0, "output": 50.0, "cache_read": 0.25, "cache_write": 12.5},
     "claude-opus-5-5":  {"input": 4.0,  "output": 20.0, "cache_read": 0.4,  "cache_write": 5.0},
     "claude-sonnet-5":  {"input": 2.0,  "output": 10.0, "cache_read": 0.2,  "cache_write": 2.5},
 }
 
+# Fable 5.1 réfléchit toujours et la réflexion compte dans max_tokens :
+# une limite basse tronque le JSON de sortie.
 MAX_TOKENS_PAR_APPEL = {
-    "analyse_seance": 1500,
-    "bilan_hebdo": 4000,
-    "reconstruction_evenements": 4000,
+    "analyse_seance": 16000,
+    "bilan_hebdo": 16000,
+    "reconstruction_evenements": 16000,
 }
 
 PLAFOND_MENSUEL_USD = 5.0
