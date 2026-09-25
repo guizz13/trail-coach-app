@@ -73,7 +73,7 @@ async function generer() {
   let imperatifs;
   try { imperatifs = lireImperatifs(); } catch (err) { erreurSimple(res, err); return; }
   $("#generer").disabled = true;
-  reflexion(res);
+  chargeurIA(res, MESSAGES_BILAN);
   res.scrollIntoView({ behavior: "smooth", block: "start" });
   try {
     bilan = await api("POST", "/api/bilan", imperatifs);

@@ -116,7 +116,7 @@ function carte(a, fichier, brut) {
     envoi.append("options", JSON.stringify(opts));
     const res = $(".resultat", el);
     bouton.disabled = true;
-    reflexion(res, opts.analyser ? "Sensei réfléchit…" : "Import…");
+    if (opts.analyser) chargeurIA(res, MESSAGES_ANALYSE); else reflexion(res, "Import…");
     try {
       const r = await api("POST", "/api/import", envoi);
       if (!r.doublon && trace) stockage.ecrire("trace:" + r.seance.fichier_hash, trace);

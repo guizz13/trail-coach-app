@@ -246,7 +246,7 @@ function ouvrirModale(e) {
 // Chaque modification déclenche la reconstruction du plan par le coach
 async function executer(promesse, apres) {
   const zone = $("#reconstruction");
-  reflexion(zone, "Sensei reconstruit le plan…");
+  chargeurIA(zone);
   zone.scrollIntoView({ behavior: "smooth", block: "center" });
   try {
     const r = await promesse;

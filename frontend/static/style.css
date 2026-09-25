@@ -414,3 +414,17 @@ dialog.feuille::backdrop { background: rgba(0, 0, 0, .6); }
 .op-detail { font-size: 11px; color: var(--text-secondary); margin-top: 1px; }
 .op-chevron { font-size: 16px; color: var(--text-muted); }
 .badge.badge-mini { font-size: 9px; padding: 3px 7px; }
+
+/* ---- Chargeur des appels au coach -------------------------------------------------------------- */
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.8; }
+}
+.skeleton { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.skeleton-block {
+  background: var(--bg-surface);
+  border-radius: 10px;
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+.skeleton-texte { margin: 4px 0 0; font-size: 12px; color: var(--text-muted); text-align: center; }
+@media (prefers-reduced-motion: reduce) { .skeleton-block { animation: none; opacity: .6; } }
