@@ -402,3 +402,15 @@ dialog.feuille::backdrop { background: rgba(0, 0, 0, .6); }
 .modale input, .modale select, .modale textarea { border-radius: 10px; padding: 12px 14px; font-size: 16px; }
 .modale input[type=file] { padding: 10px; font-size: 13px; }
 .btn.modale-valider { border-radius: 12px; padding: 14px; font-weight: 600; margin-top: 18px; }
+
+/* ---- Semaine : objectif dans les 28 jours ---------------------------------------------------- */
+.objectif-proche {
+  display: flex; align-items: center; gap: 12px; margin-top: 12px; color: inherit;
+  background: var(--bg-card); border: 0.5px solid var(--border); border-radius: 14px; padding: 12px 14px; cursor: pointer;
+}
+.type-grand { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; font-size: 20px; flex-shrink: 0; }
+.op-nom { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.op-compte { font-size: 18px; font-weight: 700; letter-spacing: -0.5px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.op-detail { font-size: 11px; color: var(--text-secondary); margin-top: 1px; }
+.op-chevron { font-size: 16px; color: var(--text-muted); }
+.badge.badge-mini { font-size: 9px; padding: 3px 7px; }

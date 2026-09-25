@@ -6,10 +6,11 @@ coque(`<span class="avatar">GA</span>`);
 let tableau = null;          // /api/dashboard (semaine courante)
 let graphiques = null;       // /api/graphiques (12 semaines)
 let lundiAffiche = null;
+let objectifs = null;       // /api/evenements (événements à venir + plan de prépa)
 
 async function charger(lundi) {
   try {
-    if (!tableau) [tableau, graphiques] = await Promise.all([api("GET", "/api/dashboard"), api("GET", "/api/graphiques")]);
+    if (!tableau) [tableau, graphiques, objectifs] = await Promise.all([api("GET", "/api/dashboard"), api("GET", "/api/graphiques"), api("GET", "/api/evenements")]);
     lundiAffiche = lundi || tableau.lundi;
     const courante = lundiAffiche === tableau.lundi;
     const dimanche = ajouterJours(lundiAffiche, 6);
@@ -19,6 +20,7 @@ async function charger(lundi) {
     ]);
     const verdicts = await verdictsDe(realisees);
     rendreEntete(dimanche);
+    rendreObjectifProche();
     rendreCoach(dimanche);
     rendreForme(courante, realisees, dimanche);
     rendreVolume(courante, realisees);
@@ -50,6 +52,43 @@ function rendreEntete(dimanche) {
   badges.push(niveau === "100%" ? `<span class="badge vert">Santé 100%</span>`
     : `<span class="badge ${niveau === "blessure" ? "rouge" : "orange"}">${niveau === "blessure" ? "Blessure" : "Vigilance"} ${esc(zone || "")}</span>`);
   $("#badges").innerHTML = badges.join("");
+}
+
+// Objectif A ou B dans les 28 prochains jours : carte sous les badges, sinon rien
+const STYLE_EVT = {
+  trail_race: { icone: "ti-run", c: "var(--orange)", dim: "var(--orange-dim)" },
+  squash_competition: { icone: "ti-ball-tennis", c: "var(--purple)", dim: "var(--purple-dim)" },
+  other: { icone: "ti-calendar-event", c: "var(--text-secondary)", dim: "var(--bg-surface)" },
+};
+const COULEUR_PHASE = { BASE: ["var(--accent)", "var(--accent-dim)"], BUILD: ["var(--orange)", "var(--orange-dim)"],
+  PIC: ["var(--purple)", "var(--purple-dim)"], AFFUTAGE: ["var(--green)", "var(--green-dim)"] };
+
+function rendreObjectifProche() {
+  const el = $("#objectif-proche"), jour = tableau.aujourdhui;
+  const e = objectifs.evenements.find(x => ["A", "B"].includes(x.priorite) && joursEntre(jour, x.date_evt) <= 28);
+  if (!e) { el.innerHTML = ""; return; }
+  const st = STYLE_EVT[e.type] || STYLE_EVT.other;
+  const lieu = (e.notes || "").match(/^Lieu : (.*)/);
+  const ligne2 = e.type === "trail_race" ? [e.distance_km && nb(e.distance_km, 1, "km"), e.dplus_m && nb(e.dplus_m, 0, "m D+")].filter(Boolean).join(" · ")
+    : lieu ? lieu[1] : dateFR(e.date_evt, { weekday: "long", day: "numeric", month: "long" });
+  // Phase en cours et semaine de prépa, d'après les phases rattachées à cet objectif
+  const phases = objectifs.plan_prepa.filter(p => p.evenement_id === e.id);
+  const phase = phases.find(p => p.du <= jour && jour <= p.au);
+  let ligne3 = "";
+  if (phase) {
+    const debut = phases[0].du, [c, dim] = COULEUR_PHASE[phase.phase] || ["var(--text-secondary)", "var(--bg-surface)"];
+    const total = Math.ceil(joursEntre(debut, e.date_evt) / 7), n = Math.min(total, Math.floor(joursEntre(debut, jour) / 7) + 1);
+    ligne3 = `<div class="ligne" style="margin-top:6px"><span class="badge badge-mini" style="background:${dim};color:${c}">${esc(PHASES[phase.phase] || phase.phase)}</span>
+      <span class="sous-texte" style="font-size:10px">semaine ${n}/${total}</span></div>`;
+  }
+  el.innerHTML = `<a class="objectif-proche" href="/evenements">
+      <span class="type-grand" style="background:${st.dim};color:${st.c}"><i class="ti ${st.icone}"></i></span>
+      <div style="flex:1;min-width:0">
+        <div class="ligne entre"><span class="op-nom">${esc(e.titre)}</span><span class="op-compte" style="color:${st.c}">J-${joursEntre(jour, e.date_evt)}</span></div>
+        ${ligne2 ? `<div class="op-detail">${esc(ligne2)}</div>` : ""}
+        ${ligne3}
+      </div>
+      <i class="ti ti-chevron-right op-chevron"></i></a>`;
 }
 
 // Message du coach : seulement si une analyse ou un bilan date de la semaine affichée
