@@ -163,7 +163,7 @@ function reflexion(el, texte = "Sensei réfléchit…") {
   el.innerHTML = `<div class="reflexion"><span class="spinner"></span>${esc(texte)}</div>`;
 }
 
-// Chargeur des appels au coach (5 à 15 s) : blocs pulsants + message qui tourne toutes les 3 s
+// Chargeur des appels au coach (5 à 15 s) : kanji 先 qui pulse + message qui tourne toutes les 3 s
 const loadingMessages = [
   "Sensei analyse ton historique...",
   "Construction des phases...",
@@ -183,10 +183,10 @@ const MESSAGES_BILAN = [
   "Construction de ta semaine...",
 ];
 function chargeurIA(el, messages = loadingMessages) {
-  el.innerHTML = `<div class="skeleton" aria-busy="true">
-      ${[40, 60, 40, 50].map(h => `<div class="skeleton-block" style="height:${h}px"></div>`).join("")}
-      <p class="skeleton-texte" role="status">${esc(messages[0])}</p></div>`;
-  const texte = $(".skeleton-texte", el);
+  el.innerHTML = `<div class="carte chargeur-ia" aria-busy="true">
+      <div class="chargeur-kanji" aria-hidden="true">先</div>
+      <p class="chargeur-texte" role="status">${esc(messages[0])}</p></div>`;
+  const texte = $(".chargeur-texte", el);
   let i = 0;
   const minuteur = setInterval(() => {
     if (!texte.isConnected) { clearInterval(minuteur); return; }   // résultat affiché : on s'arrête

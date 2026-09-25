@@ -449,16 +449,16 @@ dialog.feuille::backdrop { background: rgba(0, 0, 0, .6); }
 .op-chevron { font-size: 16px; color: var(--text-muted); }
 .badge.badge-mini { font-size: 9px; padding: 3px 7px; }
 
-/* ---- Chargeur des appels au coach -------------------------------------------------------------- */
-@keyframes skeleton-pulse {
+/* ---- Chargeur des appels au coach : kanji qui pulse, 120 px de haut au plus ---------------------- */
+@keyframes kanji-pulse {
   0%, 100% { opacity: 0.4; }
-  50% { opacity: 0.8; }
+  50% { opacity: 1; }
 }
-.skeleton { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
-.skeleton-block {
-  background: var(--bg-surface);
-  border-radius: 10px;
-  animation: skeleton-pulse 1.5s ease-in-out infinite;
+.chargeur-ia { max-height: 120px; margin-top: 8px; padding: 16px 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; overflow: hidden; }
+.chargeur-kanji {
+  font-family: -apple-system, 'Hiragino Sans', 'Yu Gothic', sans-serif;
+  font-size: 48px; line-height: 1; font-weight: 800; color: var(--accent);
+  animation: kanji-pulse 2s ease-in-out infinite;
 }
-.skeleton-texte { margin: 4px 0 0; font-size: 12px; color: var(--text-muted); text-align: center; }
-@media (prefers-reduced-motion: reduce) { .skeleton-block { animation: none; opacity: .6; } }
+.chargeur-texte { margin: 0; font-size: 12px; color: var(--text-muted); text-align: center; }
+@media (prefers-reduced-motion: reduce) { .chargeur-kanji { animation: none; opacity: .8; } }
