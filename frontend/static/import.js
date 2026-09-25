@@ -144,7 +144,7 @@ function afficherResultat(el, r, analyseDemandee) {
   }).join("");
 
   el.innerHTML = `<div class="verdict-carte">
-      <div class="tete ${r.verdict}"><span>${VERDICTS[r.verdict]}</span><span>Équilibre ${acwr.ratio == null ? "—" : nb(acwr.ratio, 2)}</span></div>
+      <div class="tete ${r.verdict}"><span>${VERDICTS[r.verdict]}</span><span>${acwr.zone === "insuffisant" ? "Historique court" : `Équilibre ${acwr.ratio == null ? "—" : nb(acwr.ratio, 2)}`}</span></div>
       <div class="corps">
         ${a ? texteReplie(a.analyse) : ""}
         ${signaux ? `<ul class="sous-texte" style="padding-left:16px;margin:0 0 8px">${signaux}</ul>` : ""}

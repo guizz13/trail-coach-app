@@ -104,8 +104,11 @@ function rendreForme(courante, realisees, dimanche) {
   // Équilibre de charge : valeur du jour pour la semaine courante, fin de semaine sinon
   let ratio = null, sous = "";
   if (courante) {
-    ratio = tableau.acwr.ratio;
-    sous = `aiguë ${nb(tableau.acwr.charge_aigue)} · chronique ${nb(tableau.acwr.charge_chronique)}`;
+    // Historique trop court : le ratio n'est pas fiable, on ne l'affiche pas
+    const insuffisant = tableau.acwr.zone === "insuffisant";
+    ratio = insuffisant ? null : tableau.acwr.ratio;
+    sous = insuffisant ? "historique insuffisant pour évaluer"
+      : `aiguë ${nb(tableau.acwr.charge_aigue)} · chronique ${nb(tableau.acwr.charge_chronique)}`;
   } else {
     const s = graphiques.semaines.find(x => x.lundi === lundiAffiche);
     ratio = s ? s.acwr : null;

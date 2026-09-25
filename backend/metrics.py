@@ -53,11 +53,16 @@ class ACWR:
     charge_aigue: float          # semaine en cours (7 derniers jours)
     charge_chronique: float      # moyenne des 4 semaines précédentes
     ratio: Optional[float]
-    zone: str                    # sous_charge | optimal | vigilance | danger
+    zone: str                    # sous_charge | optimal | vigilance | danger | insuffisant
 
     @property
     def verdict(self) -> str:
-        return {"sous_charge": "vert", "optimal": "vert", "vigilance": "orange", "danger": "rouge"}[self.zone]
+        return {"sous_charge": "vert", "optimal": "vert", "vigilance": "orange", "danger": "rouge",
+                "insuffisant": "vert"}[self.zone]
+
+
+# En dessous de 14 jours d'historique dans la fenêtre chronique, le ratio n'est pas fiable
+JOURS_HISTORIQUE_MIN = 14
 
 
 def calculer_acwr(seances: list[dict], date_ref: Optional[date] = None) -> ACWR:
@@ -81,6 +86,12 @@ def calculer_acwr(seances: list[dict], date_ref: Optional[date] = None) -> ACWR:
 
     ca = charge_semaine(aigue)
     cc = charge_semaine(chronique) / 4 if chronique else 0.0
+
+    # Historique couvert par la fenêtre chronique : de la plus ancienne séance au début de la fenêtre aiguë
+    dates_chroniques = [d for d in (_date_de(s) for s in chronique) if d]
+    jours_historique = (debut_aigue - min(dates_chroniques)).days if dates_chroniques else 0
+    if jours_historique < JOURS_HISTORIQUE_MIN:
+        return ACWR(ca, cc, round(ca / cc, 2) if cc else None, "insuffisant")
 
     if cc == 0:
         return ACWR(ca, cc, None, "sous_charge" if ca == 0 else "optimal")
@@ -145,12 +156,13 @@ SEUILS = {
     "acwr":           {"orange": 1.4, "rouge": 1.5},
     "recovery_h":     {"rouge": 48},
 }
+CHARGE_CHRONIQUE_MIN = 50      # charge hebdo moyenne en dessous de laquelle l'ACWR n'alerte pas
 
 
 @dataclass
 class Signal:
     nom: str
-    niveau: str        # orange | rouge
+    niveau: str        # orange | rouge | info (informatif, sans effet sur le verdict)
     valeur: float
     seuil: float
     detail: str
@@ -191,8 +203,11 @@ def evaluer_seance(realise: dict, prevu: Optional[dict], acwr: Optional[ACWR],
         _check(signaux, "ecart_volume", ecart, SEUILS["ecart_volume"],
                f"écart de {ecart:.0f} % entre {realise['distance_km']} km réalisés et {prevu['distance_km']} km prévus")
 
-    # ACWR
-    if acwr and acwr.ratio is not None:
+    # ACWR : pas d'alerte tant que l'historique de charge est trop court pour être fiable
+    if acwr and (acwr.zone == "insuffisant" or acwr.charge_chronique < CHARGE_CHRONIQUE_MIN):
+        signaux.append(Signal("acwr", "info", round(acwr.charge_chronique, 1), CHARGE_CHRONIQUE_MIN,
+                              "Historique de charge trop court pour évaluer"))
+    elif acwr and acwr.ratio is not None:
         _check(signaux, "acwr", acwr.ratio, SEUILS["acwr"],
                f"ACWR à {acwr.ratio} (charge aiguë {acwr.charge_aigue:.0f} / chronique {acwr.charge_chronique:.0f})")
 
