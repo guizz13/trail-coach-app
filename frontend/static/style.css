@@ -127,7 +127,9 @@ h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; margin: 6px 0 14
 /* ---- Cartes ------------------------------------------------------------------ */
 .carte { background: var(--bg-card); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 14px; }
 .carte + .carte { margin-top: 8px; }
-.grille-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.grille-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: stretch; }
+/* Dans une grille, l'écart vient du gap : la marge entre cartes décalerait la seconde de 8 px */
+.grille-2 > .carte + .carte { margin-top: 0; }
 .metrique .label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .6px; font-weight: 600; }
 .metrique .valeur { font-size: 20px; font-weight: 700; letter-spacing: -0.5px; margin: 4px 0 2px; font-variant-numeric: tabular-nums; }
 
