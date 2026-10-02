@@ -75,30 +75,24 @@ a { color: var(--accent-light); text-decoration: none; }
    reste réservé aux aplats, traits et icônes. */
 /* ---- Top bar --------------------------------------------------------------- */
 .topbar { display: flex; align-items: center; justify-content: space-between; height: 52px; }
-.logo-box {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.logo-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #8B5CF6, #5B21B6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: -apple-system, 'Hiragino Sans', 'Yu Gothic', sans-serif;
+.wordmark {
+  display: inline-flex;
+  align-items: baseline;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", Inter, system-ui, sans-serif;
   font-size: 18px;
   font-weight: 800;
-  color: #FFFFFF;
-}
-.logo-text {
-  font-size: 18px;
-  font-weight: 700;
   letter-spacing: 3px;
-  text-transform: uppercase;
+  line-height: 1;
   color: var(--accent-light);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.wordmark-s {
+  width: 0.72em;
+  height: 0.72em;
+  margin-right: 3px;
+  align-self: baseline;
+  transform: translateY(0.02em);
 }
 .avatar {
   width: 32px; height: 32px; border-radius: 50%; background: var(--bg-surface);
@@ -459,18 +453,38 @@ dialog.feuille::backdrop { background: rgba(0, 0, 0, .6); }
 .badge.badge-mini { font-size: 9px; padding: 3px 7px; }
 
 /* ---- Chargeur des appels au coach : kanji qui pulse, 120 px de haut au plus ---------------------- */
-@keyframes kanji-pulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
-}
-.chargeur-ia { max-height: 120px; margin-top: 8px; padding: 16px 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; overflow: hidden; }
-.chargeur-kanji {
-  font-family: -apple-system, 'Hiragino Sans', 'Yu Gothic', sans-serif;
-  font-size: 48px; line-height: 1; font-weight: 800; color: var(--accent);
-  animation: kanji-pulse 2s ease-in-out infinite;
-}
+.chargeur-ia { max-height: 120px; margin-top: 8px; padding: 16px 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; overflow: hidden; }
 .chargeur-texte { margin: 0; font-size: 12px; color: var(--text-muted); text-align: center; }
-@media (prefers-reduced-motion: reduce) { .chargeur-kanji { animation: none; opacity: .8; } }
+
+/* Le S se trace du bas (départ) vers le haut, puis le point (sommet) apparaît */
+.loader-s { width: 40px; height: 40px; color: var(--accent); margin: 0 auto; }
+.loader-s svg { width: 100%; height: 100%; overflow: visible; }
+.loader-s path {
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  animation: trace-s 1.6s ease-in-out infinite;
+}
+.loader-s circle {
+  opacity: 0;
+  transform-box: fill-box;        /* mise à l'échelle autour du centre du point */
+  transform-origin: center;
+  animation: sommet 1.6s ease-in-out infinite;
+}
+@keyframes trace-s {
+  0%   { stroke-dashoffset: 100; }
+  55%  { stroke-dashoffset: 0; }
+  85%  { stroke-dashoffset: 0; opacity: 1; }
+  100% { stroke-dashoffset: 0; opacity: 0; }
+}
+@keyframes sommet {
+  0%, 50% { opacity: 0; transform: scale(0.4); }
+  60%, 85% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .loader-s path { animation: none; stroke-dashoffset: 0; }
+  .loader-s circle { animation: none; opacity: 1; }
+}
 
 /* ---- Stats : action d'administration, discrète -------------------------------------------------- */
 .admin { margin-top: 28px; text-align: center; }
