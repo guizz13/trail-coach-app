@@ -332,7 +332,8 @@ def api_bilan(imperatifs: dict = Body(...)):
 def api_bilan_verifier(id_: int, corps: dict = Body(...)):
     a = _ou_404(db.analyse(id_), "Bilan")
     jour_repos = ((a["reponse_json"] or {}).get("semaine_suivante") or {}).get("jour_repos")
-    return services.verifier_regles(corps.get("seances") or [], jour_repos)
+    from datetime import date
+    return services.verifier_regles(corps.get("seances") or [], jour_repos, date.fromisoformat(a["semaine_debut"]))
 
 
 @app.post("/api/bilan/{id_}/valider")

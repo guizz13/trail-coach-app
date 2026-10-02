@@ -897,6 +897,7 @@ def valider_ajustement(reponse: dict, lundi: date, premier: date) -> list[str]:
             violations.append(f"Course de plus de 1h15 en semaine ({nom}).")
         if {"muscu", "course"} <= {f for f, _, _ in j}:
             violations.append(f"Muscu et course le même jour en semaine ({nom}).")
+    violations += regle_vigilance(sum(m or 0 for j in activites.values() for f, m, _ in j if f == "course"), lundi)
     return violations
 
 
@@ -1297,7 +1298,34 @@ def semaine_a_planifier(d: Optional[date] = None) -> date:
     return d if d.weekday() == 0 else lundi_de(d) + timedelta(weeks=1)
 
 
-def verifier_regles(seances: list[dict], jour_repos: Optional[str] = None) -> dict:
+# ---------------------------------------------------------------------------
+# Progression en Vigilance (sans protocole kiné) : +10 % max sur la moyenne des 3 dernières semaines
+# ---------------------------------------------------------------------------
+PROGRESSION_VIGILANCE = 1.10
+
+
+def plafond_course_vigilance(lundi: date) -> Optional[float]:
+    """Minutes de course autorisées sur la semaine de `lundi`, ou None si la règle ne s'applique pas
+    (pas en vigilance, protocole kiné renseigné — il prime —, ou aucun historique de course)."""
+    sante = sante_profil()
+    if sante["niveau"] != "vigilance" or sante.get("protocole"):
+        return None
+    minutes = [sum(s["duree_min"] or 0 for s in db.seances_entre(
+        (lundi - timedelta(weeks=k)).isoformat(), (lundi - timedelta(weeks=k) + timedelta(days=6)).isoformat(),
+        familles=extractor.FAMILLE_COURSE)) for k in (1, 2, 3)]
+    moyenne = sum(minutes) / 3
+    return round(moyenne * PROGRESSION_VIGILANCE) if moyenne > 0 else None
+
+
+def regle_vigilance(minutes_course: float, lundi: date) -> list[str]:
+    plafond = plafond_course_vigilance(lundi)
+    if plafond is not None and minutes_course > plafond:
+        return [f"Vigilance sans protocole : {minutes_course:.0f} min de course prévues, plafond {plafond:.0f} min "
+                f"(+10 % sur la moyenne des 3 dernières semaines)."]
+    return []
+
+
+def verifier_regles(seances: list[dict], jour_repos: Optional[str] = None, lundi: Optional[date] = None) -> dict:
     """Double sécurité côté code sur la semaine générée.
     Retourne {'bloquantes': [...], 'avertissements': [...]}."""
     bloquantes, avert = [], []
@@ -1339,6 +1367,9 @@ def verifier_regles(seances: list[dict], jour_repos: Optional[str] = None) -> di
         if any(s["type"] == "muscu_push" for s in du_jour) and any(s["type"] == "squash" for s in du_jour):
             bloquantes.append(f"Muscu PUSH et squash le même jour ({jour}).")
 
+    if lundi is not None:
+        course = sum(s.get("duree_min") or 0 for s in actives if famille_planifiee(s.get("type")) == "course")
+        bloquantes += regle_vigilance(course, lundi)
     return {"bloquantes": bloquantes, "avertissements": avert}
 
 
@@ -1401,15 +1432,27 @@ def bilan_hebdo(imperatifs: dict) -> dict:
         "notes": imperatifs.get("notes"),
     }
 
-    # 4-5. LLM + trace
-    reponse, erreur, trace = _appel_llm("bilan_hebdo", lambda llm: llm.bilan_hebdo(
-        semaine_ecoulee=[_seance_llm(s) for s in ecoulee],
-        plan_prevu=[_planifiee_llm(x) for x in plan],
-        imperatifs=imperatifs_llm,
-        historique_4sem=resume_semaines(4, lundi_prec),
-        evenements=evenements, indicateurs=indicateurs, profil=_profil_llm(p),
-        statut_sante=statut, mode=p.get("mode_actif", "BASE"), phase_prepa=phase))
-    analyse_id = _tracer("bilan_hebdo", reponse, erreur, trace, semaine_debut=lundi.isoformat())
+    # 4-5. LLM + trace ; en vigilance sans protocole, un nouvel essai si le volume de course dépasse +10 %
+    historique = resume_semaines(4, lundi_prec)
+    cout_total = 0.0
+    for essai in range(2):
+        reponse, erreur, trace = _appel_llm("bilan_hebdo", lambda llm: llm.bilan_hebdo(
+            semaine_ecoulee=[_seance_llm(s) for s in ecoulee],
+            plan_prevu=[_planifiee_llm(x) for x in plan],
+            imperatifs=imperatifs_llm,
+            historique_4sem=historique,
+            evenements=evenements, indicateurs=indicateurs, profil=_profil_llm(p),
+            statut_sante=statut, mode=p.get("mode_actif", "BASE"), phase_prepa=phase))
+        analyse_id = _tracer("bilan_hebdo", reponse, erreur, trace, semaine_debut=lundi.isoformat())
+        cout_total += trace["cout_usd"]
+        if reponse is None:
+            break
+        prevues = (reponse.get("semaine_suivante") or {}).get("seances") or []
+        exces = regle_vigilance(sum(s.get("duree_min") or 0 for s in prevues if isinstance(s, dict)
+                                    and famille_planifiee(s.get("type")) == "course"), lundi)
+        if not exces or essai == 1:
+            break
+        imperatifs_llm = {**imperatifs_llm, "erreur_tentative_precedente": "Règle violée, corrige-la : " + exces[0]}
 
     # Phase de prépa : code fermé, le texte libre passe dans « detail »
     if reponse is not None and isinstance(reponse.get("position_prepa"), dict):
@@ -1419,10 +1462,10 @@ def bilan_hebdo(imperatifs: dict) -> dict:
     regles = None
     if reponse is not None:
         sem = reponse.get("semaine_suivante") or {}
-        regles = verifier_regles(sem.get("seances") or [], sem.get("jour_repos"))
+        regles = verifier_regles(sem.get("seances") or [], sem.get("jour_repos"), lundi)
 
     return {"analyse_id": analyse_id, "semaine_debut": lundi.isoformat(), "indicateurs": indicateurs,
-            "reponse": reponse, "erreur_llm": erreur, "regles": regles, "cout": trace["cout_usd"]}
+            "reponse": reponse, "erreur_llm": erreur, "regles": regles, "cout": round(cout_total, 5)}
 
 
 PHASES_PREPA = ("BASE", "BUILD", "PIC", "AFFUTAGE", "LIBRE")
@@ -1449,7 +1492,7 @@ def valider_semaine(analyse_id: int, seances: Optional[list[dict]] = None) -> di
         raise ValueError("Bilan introuvable.")
     sem = a["reponse_json"]["semaine_suivante"]
     seances = seances if seances is not None else sem.get("seances") or []
-    regles = verifier_regles(seances, sem.get("jour_repos"))
+    regles = verifier_regles(seances, sem.get("jour_repos"), date.fromisoformat(a["semaine_debut"]))
     if regles["bloquantes"]:
         raise ValueError("Validation refusée, règles dures violées : " + " ; ".join(regles["bloquantes"]))
 

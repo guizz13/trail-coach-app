@@ -223,10 +223,12 @@ def test_bilan_puis_validation(monkeypatch):
     services.importer_et_analyser(lire("course_tapis"), "t.json", analyser=False)
     r = services.bilan_hebdo({"semaine_debut": "2026-09-28", "squash": [{"jour": "lundi", "creneau": "soir"}],
                               "contraintes": [{"jour": "jeudi", "creneau": "soir", "raison": "réunion"}],
-                              "ressenti": 7, "sommeil": 6, "statut_sante": "vigilance:achille gauche"})
+                              "ressenti": 7, "sommeil": 6,
+                              "sante": {"niveau": "vigilance", "zones": ["Achille G"], "note": "achille gauche",
+                                        "protocole": "course 30 min max"}})   # le protocole prime sur le plafond +10 %
     assert r["regles"]["bloquantes"] == []
     assert services.sante_profil() == {"niveau": "vigilance", "zones": ["Achille G"], "note": "achille gauche",
-                                       "protocole": None}
+                                       "protocole": "course 30 min max"}
     assert db.imperatifs("2026-09-28")["contraintes"][0]["raison"] == "réunion"
 
     _, ctx = faux.appels[0]
@@ -326,3 +328,45 @@ def test_recalcul_des_verdicts(monkeypatch):
     c = db.analyse(course["analyse_id"])
     assert c["verdict"] == "orange"                                         # 76 % en Z3+ sur EF prévue
     assert "ef_intensite" in {s["nom"] for s in c["reponse_json"]["recalcul"]["signaux"]}
+
+
+def test_ancien_format_sante_toujours_accepte(monkeypatch):
+    brancher(monkeypatch, bilan_hebdo=bilan(SEMAINE_OK))
+    services.bilan_hebdo({"semaine_debut": "2026-09-28", "statut_sante": "vigilance:achille gauche"})
+    assert services.sante_profil()["zones"] == ["Achille G"]
+
+
+# ---- Section 7 (v4) : progression plafonnée en vigilance sans protocole -------------------------
+def test_vigilance_sans_protocole_nouvel_essai(monkeypatch):
+    # 3 semaines d'historique : tapis 30 min le 23/09 et outdoor 35 min le 15/09 → moyenne 21,7 min → plafond 24
+    services.importer_et_analyser(lire("course_tapis"), "t.json", analyser=False)
+    services.importer_et_analyser(lire("course_outdoor"), "o.json", analyser=False)
+    trop = SEMAINE_OK                                                     # 50 + 45 + 150 = 245 min de course
+    sobre = [{**x, "duree_min": 20} if x["type"] == "EF" else x
+             for x in SEMAINE_OK if x["type"] not in ("intervals", "sortie_longue")]   # 20 min de course
+    faux = FauxLLM(bilan_hebdo=bilan(trop))
+    reponses = [bilan(trop), bilan(sobre)]
+    faux.bilan_hebdo = lambda **ctx: (faux.appels.append(("bilan_hebdo", ctx)), reponses.pop(0))[1]
+    monkeypatch.setattr(services, "_llm", faux)
+    r = services.bilan_hebdo({"semaine_debut": "2026-09-28", "sante": {"niveau": "vigilance", "zones": ["Achille D"]}})
+    assert len(faux.appels) == 2
+    assert "erreur_tentative_precedente" in faux.appels[1][1]["imperatifs"]
+    assert not any("Vigilance" in b for b in r["regles"]["bloquantes"])
+
+
+def test_vigilance_deux_echecs_bloquent_la_validation(monkeypatch):
+    services.importer_et_analyser(lire("course_tapis"), "t.json", analyser=False)
+    brancher(monkeypatch, bilan_hebdo=bilan(SEMAINE_OK))
+    r = services.bilan_hebdo({"semaine_debut": "2026-09-28", "sante": {"niveau": "vigilance", "zones": ["Achille D"]}})
+    assert any("Vigilance sans protocole" in b for b in r["regles"]["bloquantes"])
+    with pytest.raises(ValueError, match="règles dures"):
+        services.valider_semaine(r["analyse_id"])
+
+
+def test_plafond_ne_s_applique_pas_avec_protocole_ou_sans_historique():
+    services.enregistrer_sante({"niveau": "vigilance", "zones": ["Achille D"]})
+    assert services.plafond_course_vigilance(date(2026, 9, 28)) is None          # aucun historique
+    services.importer_et_analyser(lire("course_tapis"), "t.json", analyser=False)
+    assert services.plafond_course_vigilance(date(2026, 9, 28)) == 11             # 30 min / 3 × 1,1
+    services.enregistrer_sante({"niveau": "vigilance", "zones": ["Achille D"], "protocole": "30 min max"})
+    assert services.plafond_course_vigilance(date(2026, 9, 28)) is None
