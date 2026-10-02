@@ -32,7 +32,10 @@ def test_import_cinq_fichiers(nom):
     assert s["distance_km"] == distance
     assert s["a_fc"] == 1 and 60 < s["fc_moy"] < 191
     assert set(s["temps_zones_pct"]) == {"z1", "z2", "z3", "z4", "z5"}
-    assert s["charge"] == pytest.approx(s["epoc"], abs=0.1)
+    # Charge = TRIMP d'Edwards (minutes × poids de zone), plus l'EPOC
+    trimp = sum(w * s["temps_zones_s"][z] / 60 for z, w in {"z1": 1, "z2": 2, "z3": 3, "z4": 4, "z5": 5}.items())
+    assert s["charge"] == pytest.approx(trimp, abs=0.1)
+    assert s["charge"] != s["epoc"]
     assert r["verdict"] in ("vert", "orange", "rouge")
     assert r["analyse_llm"] is None
 
@@ -121,9 +124,10 @@ def test_acwr_et_distribution():
         services.importer_et_analyser(lire(nom), f"{nom}.json")
     from datetime import date
     a = services.acwr_au(date(2026, 9, 23))
+    charges = {x["famille"]: x["charge"] for x in db.fetch_all("SELECT famille, charge FROM seances_realisees")}
     # Aiguë 17-23 sept : muscu + vélo + tapis ; chronique : outdoor (15) + squash (27/08)
-    assert a.charge_aigue == pytest.approx(13.5 + 41.1 + 23)
-    assert a.charge_chronique == pytest.approx((87.3 + 149.8) / 4)
+    assert a.charge_aigue == pytest.approx(charges["muscu"] + charges["velo"] + charges["course_tapis"], abs=0.5)
+    assert a.charge_chronique == pytest.approx((charges["course_outdoor"] + charges["squash"]) / 4, abs=0.5)
     dist = services.distribution_semaine(date(2026, 9, 21))
     assert dist["z1_z2"] > 90
 

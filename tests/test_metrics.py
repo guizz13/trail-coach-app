@@ -7,8 +7,10 @@ import metrics
 REF = date(2026, 9, 25)
 
 
-def seance(jours_avant: int, epoc: float, famille: str = "course_outdoor") -> dict:
-    return {"date_debut": (REF - timedelta(days=jours_avant)).isoformat(), "epoc": epoc, "famille": famille}
+def seance(jours_avant: int, charge: float, famille: str = "course_outdoor") -> dict:
+    """Séance sans FC : la charge TRIMP vaut durée × 2, on fixe donc la durée à charge / 2."""
+    return {"date_debut": (REF - timedelta(days=jours_avant)).isoformat(), "duree_min": charge / 2,
+            "epoc": charge, "famille": famille}
 
 
 # ---- Point 4 : ACWR ------------------------------------------------------------
@@ -84,3 +86,18 @@ def test_course_garde_ses_seuils():
     s = {**seance(0, 140), "temps_zones_pct": {"z3": 65}}
     verdict, signaux = metrics.evaluer_seance(s, {"type": "EF"}, None)
     assert verdict == "rouge" and {x.nom for x in signaux} == {"epoc_sur_ef", "z3_sur_ef"}
+
+
+# ---- Section 2 (v4) : charge = TRIMP d'Edwards ----------------------------------------
+def test_charge_trimp_squash():
+    # 35 min de squash : 20 min Z4, 10 min Z5, 5 min Z2
+    s = {"duree_min": 35, "epoc": 180, "temps_zones_s": {"z2": 300, "z4": 1200, "z5": 600}}
+    assert 140 <= metrics.charge_seance(s) <= 150
+
+
+def test_charge_ordres_de_grandeur():
+    ef = {"duree_min": 45, "temps_zones_s": {"z2": 45 * 60}}
+    assert metrics.charge_seance(ef) == 90
+    sans_fc = {"duree_min": 40, "temps_zones_s": {}}
+    assert metrics.charge_seance(sans_fc) == 80          # hypothèse Z2 moyenne
+    assert metrics.charge_seance({"duree_min": 30, "epoc": 300}) == 60   # l'EPOC n'entre plus en jeu

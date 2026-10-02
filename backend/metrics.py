@@ -2,6 +2,7 @@
 Métriques d'entraînement : charge, ACWR, distribution polarisée, seuils.
 
 Ces calculs sont déterministes et faits AVANT l'appel LLM.
+La charge d'une séance est le TRIMP d'Edwards (minutes × poids de zone), pas l'EPOC.
 Le LLM reçoit les résultats et les interprète ; il ne les recalcule pas.
 
 Références :
@@ -20,25 +21,21 @@ from typing import Iterable, Optional
 # ---------------------------------------------------------------------------
 # Charge d'une séance
 # ---------------------------------------------------------------------------
+POIDS_ZONES = {"z1": 1, "z2": 2, "z3": 3, "z4": 4, "z5": 5}
+
+
 def charge_seance(seance: dict) -> float:
     """
-    Charge unitaire d'une séance, toutes disciplines confondues.
+    Charge d'une séance : TRIMP d'Edwards, somme des minutes passées dans chaque zone × poids de la zone.
 
-    Priorité à l'EPOC Suunto quand il existe (il intègre déjà intensité et durée).
-    Fallback : TRIMP simplifié (durée × facteur d'intensité par zone).
+    Les zones viennent de extractor._calculer_zones (temps_zones_s, en secondes ; le temps sous Z1
+    est compté en Z1). Sans fréquence cardiaque : hypothèse d'une Z2 moyenne (durée × 2).
+    L'EPOC Suunto (pic d'excès d'oxygène, non cumulable) ne participe plus à la charge.
     """
-    epoc = seance.get("epoc")
-    if epoc:
-        return float(epoc)
-
-    # Fallback TRIMP pondéré par zones (Edwards)
-    poids = {"z1": 1, "z2": 2, "z3": 3, "z4": 4, "z5": 5}
     zones_s = seance.get("temps_zones_s") or {}
-    if zones_s:
-        return sum(zones_s.get(z, 0) / 60 * w for z, w in poids.items())
-
-    # Dernier recours : durée seule
-    return float(seance.get("duree_min", 0))
+    if zones_s and sum(zones_s.values()) > 0:
+        return round(sum(POIDS_ZONES[z] * zones_s.get(z, 0) / 60 for z in POIDS_ZONES), 1)
+    return round(float(seance.get("duree_min") or 0) * 2, 1)
 
 
 def charge_semaine(seances: Iterable[dict]) -> float:

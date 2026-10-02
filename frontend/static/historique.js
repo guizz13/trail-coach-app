@@ -157,6 +157,7 @@ async function ouvrir(id) {
         ${s.dplus_m ? st(nb(s.dplus_m, 0, "m"), "D+") : ""}
         ${st(s.fc_moy ? `${s.fc_moy}/${s.fc_max}` : "—", "FC moy/max")}
         ${st(nb(s.charge), "charge de la séance")}
+        ${s.epoc ? st(nb(s.epoc), "EPOC") : ""}
         ${st(s.recovery_time_h ? nb(s.recovery_time_h, 0, "h") : "—", "récupération estimée")}
         ${s.peak_training_effect ? st(nb(s.peak_training_effect, 1), "effet d'entraînement") : ""}
         ${s.vo2max ? st(nb(s.vo2max, 1), "VO2max") : ""}
