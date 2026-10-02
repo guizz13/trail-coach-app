@@ -99,10 +99,23 @@ def test_squash_jamais_d_alerte_de_zones():
         assert metrics.evaluer_seance(s, prevu, SANTE_OK) == ("vert", []), prevu
 
 
-def test_ecart_de_duree_toutes_disciplines():
-    s = {"famille": "muscu", "duree_min": 30, "temps_zones_pct": {"z1": 100}}
-    verdict, signaux = metrics.evaluer_seance(s, {"type": "muscu_pull", "duree_min": 60}, SANTE_OK)
-    assert verdict == "orange" and signaux[0].nom == "ecart_duree"
+@pytest.mark.parametrize("famille", ["muscu", "squash"])
+def test_muscu_squash_ecart_seulement_si_ecourtee(famille):
+    prevu = {"type": "muscu_pull" if famille == "muscu" else "squash", "duree_min": 60}
+    def verdict(minutes):
+        return metrics.evaluer_seance({"famille": famille, "duree_min": minutes, "temps_zones_pct": {"z1": 100}}, prevu, SANTE_OK)
+    assert verdict(81) == ("vert", [])            # plus longue que prévu : jamais un écart
+    assert verdict(120)[0] == "vert"
+    assert verdict(40)[0] == "vert"               # 67 % du prévu : conforme
+    assert verdict(36)[0] == "vert"               # 60 % pile : conforme
+    v, signaux = verdict(30)                      # 50 % : écourtée
+    assert v == "orange" and signaux[0].nom == "ecart_duree" and "écourtée" in signaux[0].detail
+
+
+def test_course_et_velo_gardent_l_ecart_de_25_pct():
+    for famille, type_ in (("course_tapis", "EF"), ("velo", "velo")):
+        s = {"famille": famille, "duree_min": 80, "temps_zones_pct": {"z2": 100}}
+        assert metrics.evaluer_seance(s, {"type": type_, "duree_min": 60}, SANTE_OK)[0] == "orange", famille
 
 
 def test_rouges_de_securite():

@@ -190,7 +190,8 @@ Orange (ajustement ciblé possible, jamais rouge même cumulés) :
 - Course EF : temps ≥ Z3 > 25 %
 - Course sortie longue : Z4-Z5 > 30 %
 - Course intervals : Z4-Z5 < 8 % (qualité non atteinte)
-- Écart de durée ou distance vs prévu > 25 %
+- Course et vélo : écart de durée ou distance vs prévu > 25 %
+- Muscu et squash : séance écourtée sous 60 % de la durée prévue (plus longue que prévu n'est jamais un écart)
 
 Rouge (sécurité uniquement) :
 - Douleur ≥ 4/10, ou douleur sur une zone en Vigilance/Blessure

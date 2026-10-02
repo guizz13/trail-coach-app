@@ -199,11 +199,13 @@ SEUILS = {
     "ef_z3_et_plus": 25,        # % du temps ≥ Z3 sur une EF prévue (orange)
     "longue_z45": 30,           # % du temps en Z4-Z5 sur une sortie longue prévue (orange)
     "intervals_z45_min": 8,     # % minimal en Z4-Z5 sur des intervalles prévus (orange : qualité ratée)
-    "ecart_pct": 25,            # écart de durée ou de distance vs prévu (orange)
+    "ecart_pct": 25,            # écart de durée ou de distance vs prévu (orange) — course et vélo
+    "duree_min_pct": 60,        # muscu / squash : écart seulement sous 60 % de la durée prévue
     "recovery_h": 48,           # RecoveryTime chevauchant une séance qualité (rouge)
     "douleur": 4,               # douleur déclarée /10 (rouge)
 }
 FAMILLES_COURSE = {"course_outdoor", "course_tapis"}
+FAMILLES_DUREE_MINIMALE = {"muscu", "squash"}    # plus long que prévu : jamais un écart
 ZONES_BAS_DU_CORPS = {"Achille G", "Achille D", "Fascia G", "Fascia D", "Mollet G", "Mollet D",
                       "Genou G", "Genou D", "Hanche"}
 
@@ -248,7 +250,12 @@ def evaluer_seance(realise: dict, prevu: Optional[dict], sante: Optional[dict] =
         if type_prevu == "intervals" and z45 < SEUILS["intervals_z45_min"]:
             signaux.append(Signal("intervals_non_atteints", "orange", round(z45, 1), SEUILS["intervals_z45_min"],
                                   f"seulement {z45:.0f} % en Z4-Z5 : séance qualité non atteinte"))
-    if prevu:
+    if prevu and realise.get("famille") in FAMILLES_DUREE_MINIMALE:
+        p, r = prevu.get("duree_min"), realise.get("duree_min")
+        if p and r and r < p * SEUILS["duree_min_pct"] / 100:
+            signaux.append(Signal("ecart_duree", "orange", round(r / p * 100), SEUILS["duree_min_pct"],
+                                  f"séance écourtée : {r:g} min réalisées pour {p:g} prévues"))
+    elif prevu:
         for cle, unite, nom in (("duree_min", "min", "ecart_duree"), ("distance_km", "km", "ecart_distance")):
             p, r = prevu.get(cle), realise.get(cle)
             if p and r:
