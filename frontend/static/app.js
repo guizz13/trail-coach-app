@@ -89,12 +89,16 @@ function libelleMode(profil, prochainA) {
 
 // Disciplines : classe CSS + icône Tabler
 const ICONES = { course: "ti-run", squash: "ti-ball-tennis", muscu: "ti-barbell", velo: "ti-bike", repos: "ti-zzz", autre: "ti-activity" };
+// Même reconnaissance que le backend (services.famille_planifiee) : « Pull A » est de la muscu.
+// Un type inconnu n'est plus rangé en course par défaut.
+const MOTS_DISCIPLINE = [["repos", "repos"], ["muscu", "muscu"], ["push", "muscu"], ["pull", "muscu"], ["jambes", "muscu"],
+  ["full", "muscu"], ["squash", "squash"], ["vélo", "velo"], ["velo", "velo"], ["sortie", "course"], ["endurance", "course"],
+  ["interval", "course"], ["fractionn", "course"], ["côte", "course"], ["cote", "course"], ["tempo", "course"],
+  ["footing", "course"], ["trail", "course"], ["course", "course"]];
 function disciplineType(type) {
+  if (type === "EF") return "course";
   const t = (type || "").toLowerCase();
-  if (t.startsWith("muscu")) return "muscu";
-  if (t === "squash" || t === "velo" || t === "repos") return t;
-  if (t === "autre") return "autre";
-  return "course";
+  return (MOTS_DISCIPLINE.find(([mot]) => t.includes(mot)) || [null, "autre"])[1];
 }
 function disciplineFamille(f) {
   if (f === "course_outdoor" || f === "course_tapis") return "course";
