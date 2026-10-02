@@ -163,13 +163,14 @@ async function ouvrir(id) {
         ${s.energie_kcal ? st(nb(s.energie_kcal), "kcal") : ""}
       </div>
       ${s.a_fc ? barreZones(zonesDepuisPct(s.temps_zones_pct)) : ""}
-      ${x.prevu ? `<div class="bandeau gris">Séance prévue : ${esc(libelleType(x.prevu.type))}${x.prevu.detail ? " — " + esc(x.prevu.detail) : ""}</div>` : ""}
+      <div id="liaison"></div>
       ${m ? `<div class="section-label">Musculation${m.split ? " · " + esc(SPLITS[m.split] || m.split) : ""}</div>
         <div class="badges">${(m.groupes || []).map(g => `<span class="badge">${esc(GROUPES[g] || g)}</span>`).join("")}</div>
         ${(m.charges || []).length ? `<table style="margin-top:8px"><tr><th>Exercice</th><th class="n">kg</th><th class="n">reps</th><th class="n">séries</th></tr>
           ${m.charges.map(c => `<tr><td>${esc(c.exo)}</td><td class="n">${nb(c.kg, 1)}</td><td class="n">${nb(c.reps)}</td><td class="n">${nb(c.series)}</td></tr>`).join("")}</table>` : ""}` : ""}
       <div class="section-label">Analyse</div>
       <div id="analyses"></div>`;
+    rendreLiaison(d, x);
     const za = $("#analyses", d);
     if (!x.analyses.length) za.innerHTML = `<div class="vide">Pas d'analyse du coach pour cette séance.</div>`;
     for (const a of x.analyses) {
@@ -200,6 +201,39 @@ $("#recalculer").onclick = async () => {
   } catch (e) { erreurSimple(zone, e); }
   finally { b.disabled = false; }
 };
+
+// ---- Liaison réalisé ↔ prévu (dans le détail d'une séance) ---------------------------------------------
+const libellePrevu = p => `${libelleType(p.type)} (${dateFR(p.date_seance, { weekday: "short" })} ${CRENEAUX[p.creneau] || p.creneau})`;
+
+function rendreLiaison(d, x) {
+  const el = $("#liaison", d), id = x.seance.id;
+  const apres = async promesse => {
+    try { const nx = await promesse; rendreLiaison(d, nx); delete verdicts[id]; rendreListe(); }
+    catch (e) { erreurSimple($(".liaison-erreur", el) || el, e); }
+  };
+  if (x.prevu) {
+    el.innerHTML = `<div class="liaison"><span>Liée à : <b>${esc(libellePrevu(x.prevu))}</b>${x.seance.lien_manuel ? ` <span class="sous-texte">(manuel)</span>` : ""}</span>
+      <button type="button" class="btn petit" data-delier>Délier</button></div><div class="liaison-erreur"></div>`;
+    $("[data-delier]", el).onclick = () => apres(api("POST", `/api/seances_realisees/${id}/delier`));
+    return;
+  }
+  el.innerHTML = `<div class="liaison"><span class="secondaire">Hors plan</span>
+    <button type="button" class="btn petit" data-lier>Lier à une séance prévue</button></div>
+    <div class="liaison-choix"></div><div class="liaison-erreur"></div>`;
+  $("[data-lier]", el).onclick = async () => {
+    const zone = $(".liaison-choix", el);
+    try {
+      const c = await api("GET", `/api/seances_realisees/${id}/candidats`);
+      zone.innerHTML = c.length ? c.map(p => `<button type="button" class="objectif-ligne" data-p="${p.id}">
+          <span class="seance-corps"><span class="seance-type">${esc(libellePrevu(p))}</span>
+          ${p.detail ? `<span class="seance-detail">${esc(p.detail)}</span>` : ""}</span><i class="ti ti-link muted"></i></button>`).join("")
+        : `<div class="vide">Aucune séance prévue de la même discipline libre cette semaine.</div>`;
+      $$("[data-p]", zone).forEach(b => {
+        b.onclick = () => apres(api("POST", `/api/seances_realisees/${id}/lier`, { seance_planifiee_id: Number(b.dataset.p) }));
+      });
+    } catch (e) { erreurSimple(zone, e); }
+  };
+}
 
 charger().then(() => { if (location.hash.slice(1)) ouvrir(Number(location.hash.slice(1))); }).catch(e => erreurSimple($("#liste"), e));
 chargerMuscu().catch(e => erreurSimple($("#muscu"), e));

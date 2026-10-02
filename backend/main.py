@@ -283,7 +283,27 @@ def api_import(fichier: UploadFile = File(...), options: str = Form("{}")):
 # Protégée comme toute l'API par la session (COACH_PASSWORD) : voir _authentification
 @app.post("/api/admin/recalculate")
 def api_admin_recalculer():
-    return services.recalculer_verdicts()
+    return services.recalculer_tout()
+
+
+# ---------------------------------------------------------------------------
+# API — liaison manuelle réalisé ↔ prévu
+# ---------------------------------------------------------------------------
+@app.get("/api/seances_realisees/{id_}/candidats")
+def api_candidats(id_: int):
+    return services.candidats_liaison(id_)
+
+
+@app.post("/api/seances_realisees/{id_}/lier")
+def api_lier(id_: int, corps: dict = Body(...)):
+    if not isinstance(corps.get("seance_planifiee_id"), int):
+        raise HTTPException(422, "seance_planifiee_id (entier) attendu.")
+    return services.lier(id_, corps["seance_planifiee_id"])
+
+
+@app.post("/api/seances_realisees/{id_}/delier")
+def api_delier(id_: int):
+    return services.delier(id_)
 
 
 @app.post("/api/analyses/{id_}/decision")

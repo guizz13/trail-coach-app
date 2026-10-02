@@ -67,29 +67,55 @@ def jour_de(d: date) -> str:
     return JOURS[d.weekday()]
 
 
-def creneau_de(dt: datetime) -> str:
+# Créneaux, du plus tôt au plus tard ; « journee » (week-end) est rangé comme un après-midi
+RANG_CRENEAU = {"matin": 0, "midi": 1, "journee": 2, "soir": 3}
+
+
+def rang_creneau_realise(dt: datetime) -> int:
+    """Avant 11 h : matin ; 11-14 h : midi ; 14-17 h : après-midi ; après 17 h : soir."""
     if dt.hour < 11:
-        return "matin"
-    if dt.hour < 15:
-        return "midi"
-    return "soir"
+        return 0
+    if dt.hour < 14:
+        return 1
+    if dt.hour < 17:
+        return 2
+    return 3
 
 
 # ---------------------------------------------------------------------------
-# Familles
+# Familles de discipline (liaison réalisé ↔ prévu)
 # ---------------------------------------------------------------------------
-def famille_generale(famille: str) -> str:
-    """course_outdoor / course_tapis → course."""
-    return "course" if famille in extractor.FAMILLE_COURSE else famille
+FAMILLES_PLAN = {
+    "course": {"EF", "intervals", "cotes", "tempo", "sortie_longue", "course"},
+    "muscu": {"muscu", "muscu_push", "muscu_pull", "muscu_jambes", "muscu_full"},
+    "squash": {"squash"},
+    "velo": {"velo", "velo_ef", "velo_intervals"},
+}
+# Types écrits librement (« Pull A », « Sortie longue ») : reconnus par mot-clé.
+# Un type inconnu n'appartient à aucune famille et n'est jamais lié (avant : rangé en course par défaut).
+_MOTS_FAMILLE = [
+    ("muscu", "muscu"), ("push", "muscu"), ("pull", "muscu"), ("jambes", "muscu"), ("full", "muscu"),
+    ("squash", "squash"), ("vélo", "velo"), ("velo", "velo"),
+    ("sortie longue", "course"), ("sortie_longue", "course"), ("endurance", "course"), ("interval", "course"),
+    ("fractionn", "course"), ("côte", "course"), ("cotes", "course"), ("tempo", "course"),
+    ("footing", "course"), ("trail", "course"), ("course", "course"),
+]
+FAMILLE_REALISEE = {"course_outdoor": "course", "course_tapis": "course", "muscu": "muscu",
+                    "squash": "squash", "velo": "velo"}
 
 
-def famille_du_type_planifie(type_: str) -> str:
+def famille_planifiee(type_: Optional[str]) -> Optional[str]:
+    for f, types in FAMILLES_PLAN.items():
+        if type_ in types:
+            return f
     t = (type_ or "").lower()
-    if t.startswith("muscu"):
-        return "muscu"
-    if t in ("squash", "velo", "repos"):
-        return t
-    return "course"
+    if not t or "repos" in t:
+        return None
+    return next((f for mot, f in _MOTS_FAMILLE if mot in t), None)
+
+
+def famille_realisee(famille: Optional[str]) -> Optional[str]:
+    return FAMILLE_REALISEE.get(famille or "")
 
 
 def split_suivant(dernier: Optional[str]) -> str:
@@ -234,22 +260,131 @@ def _nombre(v) -> Optional[float]:
 # ---------------------------------------------------------------------------
 # Import : contexte (prévu, ACWR, prochaine qualité)
 # ---------------------------------------------------------------------------
-def _trouver_prevu(seance: dict) -> Optional[dict]:
-    """Séance planifiée du même jour et de la même famille, non encore réalisée."""
-    debut = en_paris(seance["date_debut"])
-    jour = debut.date().isoformat()
-    fam = famille_generale(seance["famille"])
-    candidats = [
-        p for p in db.planifiees_entre(jour, jour)
-        if p["seance_realisee_id"] is None
-        and p["statut"] in ("prevu", "modifie")
-        and famille_du_type_planifie(p["type"]) == fam
-    ]
-    if not candidats:
-        return None
-    creneau = creneau_de(debut)
-    candidats.sort(key=lambda p: p["creneau"] != creneau)
-    return candidats[0]
+def relier(du: date, au: date) -> None:
+    """Liaison automatique sur [du, au] : libère les liens automatiques puis relie chaque séance
+    réalisée (ordre chronologique) à une séance prévue du même jour et de la même famille.
+    Une séance avec lien_manuel=1 n'est jamais touchée."""
+    with db.connexion() as c:
+        c.execute(
+            "UPDATE seances_planifiees SET seance_realisee_id = NULL WHERE date_seance BETWEEN ? AND ? "
+            "AND seance_realisee_id IN (SELECT id FROM seances_realisees WHERE lien_manuel = 0)",
+            (du.isoformat(), au.isoformat()))
+    plan = db.planifiees_entre(du.isoformat(), au.isoformat())
+    for s in db.seances_entre(du.isoformat(), au.isoformat()):
+        if s["lien_manuel"]:
+            continue
+        debut = en_paris(s["date_debut"])
+        fam = famille_realisee(s["famille"])
+        candidats = [p for p in plan if p["date_seance"] == debut.date().isoformat()
+                     and p["seance_realisee_id"] is None and fam and famille_planifiee(p["type"]) == fam]
+        if not candidats:
+            continue          # hors plan : jamais de liaison automatique sur une autre date
+        rang = rang_creneau_realise(debut)
+        choisi = min(candidats, key=lambda p: (abs(RANG_CRENEAU.get(p["creneau"], 2) - rang),
+                                                RANG_CRENEAU.get(p["creneau"], 2)))
+        choisi["seance_realisee_id"] = s["id"]
+        db.maj("seances_planifiees", choisi["id"], {"seance_realisee_id": s["id"]})
+
+
+def mettre_a_jour_statuts(du: date, au: date) -> None:
+    """realise si une séance y est liée ; manque si la date est passée (aujourd'hui ne l'est jamais) ;
+    sinon prévu (ou modifié si elle l'était). Un repos n'est jamais manqué."""
+    jour = aujourdhui().isoformat()
+    for p in db.planifiees_entre(du.isoformat(), au.isoformat()):
+        if p["seance_realisee_id"]:
+            statut = "realise"
+        elif p["type"] != "repos" and p["date_seance"] < jour:
+            statut = "manque"
+        else:
+            statut = "modifie" if p["statut"] == "modifie" else "prevu"
+        if statut != p["statut"]:
+            db.maj("seances_planifiees", p["id"], {"statut": statut})
+
+
+def prevu_de(seance_id: int) -> Optional[dict]:
+    return db.fetch_one("SELECT * FROM seances_planifiees WHERE seance_realisee_id = ?", (seance_id,))
+
+
+def evaluer(seance: dict) -> tuple[str, list]:
+    """Verdict calculé (sans LLM) d'une séance réalisée, d'après son prévu lié."""
+    prevu = prevu_de(seance["id"])
+    prevu_eval = {"type": prevu["type"], "distance_km": prevu["distance_km"],
+                  "duree_min": prevu["duree_min"]} if prevu else None
+    return metrics.evaluer_seance(seance, prevu_eval, acwr_au(date_de(seance["date_debut"])),
+                                  _prochaine_qualite_dans_h(seance))
+
+
+def evaluer_et_stocker(seance: dict, horodatage: Optional[str] = None) -> tuple[str, Optional[str]]:
+    """Recalcule le verdict d'une séance, le range dans seances_realisees et dans ses analyses
+    (la réponse du LLM est conservée, le recalcul ajouté sous « recalcul »). Retourne (nouveau, ancien)."""
+    verdict, signaux = evaluer(seance)
+    analyses = [a for a in db.analyses_seance(seance["id"]) if a["type_appel"] == "analyse_seance"]
+    ancien = seance.get("verdict") or (analyses[0]["verdict"] if analyses else None)
+    sig = [asdict(x) for x in signaux]
+    db.maj("seances_realisees", seance["id"], {"verdict": verdict, "signaux": sig})
+    for a in analyses:
+        rep = a["reponse_json"] if isinstance(a["reponse_json"], dict) else {}
+        rep["recalcul"] = {"verdict": verdict, "signaux": sig, "le": horodatage or maintenant().isoformat(timespec="seconds")}
+        db.maj("analyses_llm", a["id"], {"verdict": verdict, "reponse_json": rep})
+    return verdict, ancien
+
+
+def recalculer_semaine(lundi: date) -> None:
+    """Après tout changement (import, lier/délier, édition du plan) : liaison, statuts, verdicts."""
+    dimanche = lundi + timedelta(days=6)
+    relier(lundi, dimanche)
+    mettre_a_jour_statuts(lundi, dimanche)
+    for s in db.seances_entre(lundi.isoformat(), dimanche.isoformat()):
+        evaluer_et_stocker(s)
+
+
+# ---------------------------------------------------------------------------
+# Liaison manuelle
+# ---------------------------------------------------------------------------
+def _seance_ou_erreur(seance_id: int) -> dict:
+    s = db.seance(seance_id)
+    if not s:
+        raise ValueError("Séance réalisée introuvable.")
+    return s
+
+
+def candidats_liaison(seance_id: int) -> list[dict]:
+    """Séances prévues non liées, de la même famille, dans la semaine de la séance réalisée."""
+    s = _seance_ou_erreur(seance_id)
+    lundi = lundi_de(date_de(s["date_debut"]))
+    fam = famille_realisee(s["famille"])
+    return [p for p in db.planifiees_entre(lundi.isoformat(), (lundi + timedelta(days=6)).isoformat())
+            if p["seance_realisee_id"] is None and fam and famille_planifiee(p["type"]) == fam]
+
+
+def lier(seance_id: int, planifiee_id: int) -> dict:
+    s = _seance_ou_erreur(seance_id)
+    p = db.planifiee(planifiee_id)
+    if not p:
+        raise ValueError("Séance prévue introuvable.")
+    if famille_planifiee(p["type"]) != famille_realisee(s["famille"]):
+        raise ValueError("Liaison refusée : la séance prévue n'est pas de la même discipline.")
+    lundi = lundi_de(date_de(s["date_debut"]))
+    if lundi_de(date.fromisoformat(p["date_seance"])) != lundi:
+        raise ValueError("Liaison refusée : la séance prévue n'est pas dans la même semaine.")
+    if p["seance_realisee_id"] not in (None, seance_id):
+        raise ValueError("Cette séance prévue est déjà liée à une autre séance réalisée.")
+    with db.connexion() as c:
+        c.execute("UPDATE seances_planifiees SET seance_realisee_id = NULL WHERE seance_realisee_id = ?", (seance_id,))
+        c.execute("UPDATE seances_planifiees SET seance_realisee_id = ? WHERE id = ?", (seance_id, planifiee_id))
+        c.execute("UPDATE seances_realisees SET lien_manuel = 1 WHERE id = ?", (seance_id,))
+    recalculer_semaine(lundi)
+    return detail_seance(seance_id)
+
+
+def delier(seance_id: int) -> dict:
+    s = _seance_ou_erreur(seance_id)
+    with db.connexion() as c:
+        c.execute("UPDATE seances_planifiees SET seance_realisee_id = NULL WHERE seance_realisee_id = ?", (seance_id,))
+        # lien_manuel=1 : la liaison automatique ne la recollera pas
+        c.execute("UPDATE seances_realisees SET lien_manuel = 1 WHERE id = ?", (seance_id,))
+    recalculer_semaine(lundi_de(date_de(s["date_debut"])))
+    return detail_seance(seance_id)
 
 
 def _datetime_planifiee(p: dict) -> datetime:
@@ -260,7 +395,8 @@ def _datetime_planifiee(p: dict) -> datetime:
 def _prochaine_qualite_dans_h(seance: dict) -> Optional[float]:
     fin = en_paris(seance["date_debut"]) + timedelta(minutes=seance["duree_min"] or 0)
     for p in db.planifiees_entre(fin.date().isoformat(), (fin.date() + timedelta(days=7)).isoformat()):
-        if p["type"] in TYPES_QUALITE and p["statut"] in ("prevu", "modifie"):
+        # Le chevauchement compte quel que soit le statut (prévue, réalisée, manquée)
+        if p["type"] in TYPES_QUALITE:
             dt = _datetime_planifiee(p)
             if dt > fin:
                 return round((dt - fin).total_seconds() / 3600, 1)
@@ -314,18 +450,16 @@ def importer_et_analyser(fichier_bytes: bytes, nom: str, muscu_detail: Optional[
         existant = db.seance_par_hash(h)
         return {"doublon": True, "seance_id": existant["id"] if existant else None,
                 "message": "Fichier déjà importé."}
+    # 4 et 10. Liaison au prévu (même jour, même famille) et statuts de la semaine
+    d = date_de(db.seance(seance_id)["date_debut"])
+    recalculer_semaine(lundi_de(d))
     seance = db.seance(seance_id)
-
-    # 4. Séance prévue
-    prevu = _trouver_prevu(seance)
-    prevu_eval = {"type": prevu["type"], "distance_km": prevu["distance_km"],
-                  "duree_min": prevu["duree_min"]} if prevu else None
+    prevu = prevu_de(seance_id)
 
     # 5-7. Indicateurs et verdict déterministe
-    d = date_de(seance["date_debut"])
     acwr = acwr_au(d)
     prochaine_h = _prochaine_qualite_dans_h(seance)
-    verdict, signaux = metrics.evaluer_seance(seance, prevu_eval, acwr, prochaine_h)
+    verdict, signaux = evaluer(seance)
     indicateurs = {
         "acwr": acwr_dict(acwr),
         "signaux": [asdict(x) for x in signaux],
@@ -350,10 +484,7 @@ def importer_et_analyser(fichier_bytes: bytes, nom: str, muscu_detail: Optional[
         if reponse is not None:
             verdict = _plus_severe(verdict, reponse.get("verdict"))
         analyse_id = _tracer("analyse_seance", reponse, erreur, trace, verdict=verdict, seance_id=seance_id)
-
-    # 10. Lier le prévu
-    if prevu:
-        db.maj("seances_planifiees", prevu["id"], {"statut": "realise", "seance_realisee_id": seance_id})
+    db.maj("seances_realisees", seance_id, {"verdict": verdict})
 
     # Niveau 3 de classification : le LLM tranche un sous-type incertain
     if reponse and s.famille in extractor.FAMILLE_COURSE and not confirme \
@@ -387,35 +518,36 @@ def importer_et_analyser(fichier_bytes: bytes, nom: str, muscu_detail: Optional[
 # ---------------------------------------------------------------------------
 # Recalcul des verdicts (sans appel LLM)
 # ---------------------------------------------------------------------------
-def recalculer_verdicts() -> dict:
-    """Réévalue chaque séance réalisée avec la logique actuelle de metrics (ACWR, seuils)
-    et met à jour le verdict de ses analyses. La réponse du LLM est conservée telle quelle ;
-    le verdict et les signaux recalculés sont ajoutés sous la clé « recalcul »."""
-    seances = db.fetch_all("SELECT * FROM seances_realisees ORDER BY date_debut")
+def recalculer_tout() -> dict:
+    """Recalcul admin, sans LLM : remet à zéro les liaisons automatiques, relie tout l'historique,
+    recalcule charges, statuts et verdicts. Les liaisons manuelles (lien_manuel=1) sont conservées."""
     horodatage = maintenant().isoformat(timespec="seconds")
-    changements, nb_analyses, sans_analyse = [], 0, 0
     with db.connexion() as c:
-        for s in seances:
-            prevu = db.fetch_one("SELECT * FROM seances_planifiees WHERE seance_realisee_id = ?", (s["id"],))
-            prevu_eval = {"type": prevu["type"], "distance_km": prevu["distance_km"],
-                          "duree_min": prevu["duree_min"]} if prevu else None
-            acwr = acwr_au(date_de(s["date_debut"]))
-            verdict, signaux = metrics.evaluer_seance(s, prevu_eval, acwr, _prochaine_qualite_dans_h(s))
-            analyses = [a for a in db.analyses_seance(s["id"]) if a["type_appel"] == "analyse_seance"]
-            if not analyses:
-                sans_analyse += 1
-                continue
-            for a in analyses:
-                rep = a["reponse_json"] if isinstance(a["reponse_json"], dict) else {}
-                rep["recalcul"] = {"verdict": verdict, "signaux": [asdict(x) for x in signaux],
-                                   "acwr": acwr_dict(acwr), "le": horodatage}
-                db.maj("analyses_llm", a["id"], {"verdict": verdict, "reponse_json": rep}, conn=c)
-                nb_analyses += 1
-                if a["verdict"] != verdict:
-                    changements.append({"seance_id": s["id"], "date": s["date_debut"][:10], "famille": s["famille"],
-                                        "avant": a["verdict"], "apres": verdict})
-    return {"seances": len(seances), "analyses_mises_a_jour": nb_analyses,
-            "seances_sans_analyse": sans_analyse, "changements": changements}
+        c.execute("UPDATE seances_planifiees SET seance_realisee_id = NULL "
+                  "WHERE seance_realisee_id IN (SELECT id FROM seances_realisees WHERE lien_manuel = 0)")
+    seances = db.fetch_all("SELECT * FROM seances_realisees ORDER BY date_debut")
+    for s in seances:
+        db.maj("seances_realisees", s["id"], {"charge": round(metrics.charge_seance(s), 1)})
+    dates = {date_de(s["date_debut"]) for s in seances} | {
+        date.fromisoformat(r["date_seance"]) for r in db.fetch_all("SELECT DISTINCT date_seance FROM seances_planifiees")}
+    for lundi in sorted({lundi_de(d) for d in dates}):
+        relier(lundi, lundi + timedelta(days=6))
+        mettre_a_jour_statuts(lundi, lundi + timedelta(days=6))
+    changements, nb_analyses, sans_analyse = [], 0, 0
+    for s in db.fetch_all("SELECT * FROM seances_realisees ORDER BY date_debut"):
+        apres, avant = evaluer_et_stocker(s, horodatage)
+        n = sum(1 for a in db.analyses_seance(s["id"]) if a["type_appel"] == "analyse_seance")
+        nb_analyses += n
+        sans_analyse += 0 if n else 1
+        if avant != apres:
+            changements.append({"seance_id": s["id"], "date": s["date_debut"][:10], "famille": s["famille"],
+                                "avant": avant, "apres": apres})
+    liees = db.fetch_one("SELECT COUNT(*) AS n FROM seances_planifiees WHERE seance_realisee_id IS NOT NULL")["n"]
+    return {"seances": len(seances), "analyses_mises_a_jour": nb_analyses, "seances_sans_analyse": sans_analyse,
+            "seances_liees": liees, "changements": changements}
+
+
+recalculer_verdicts = recalculer_tout      # nom historique de la route admin
 
 
 def _seance_publique(s: dict) -> dict:
@@ -518,7 +650,7 @@ def detail_seance(id_: int) -> Optional[dict]:
         "seance": _seance_publique(s),
         "muscu_detail": db.muscu_detail(id_),
         "analyses": db.analyses_seance(id_),
-        "prevu": db.fetch_one("SELECT * FROM seances_planifiees WHERE seance_realisee_id = ?", (id_,)),
+        "prevu": prevu_de(id_),
     }
 
 

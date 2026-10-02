@@ -21,7 +21,7 @@ COLONNES_JSON = {
     "temps_zones_s", "temps_zones_pct", "donnees_brutes",
     "groupes", "charges",
     "squash_jours", "contraintes",
-    "reponse_json",
+    "reponse_json", "signaux",
 }
 
 
@@ -62,6 +62,28 @@ def connexion() -> Iterator[sqlite3.Connection]:
 def init_db() -> None:
     with connexion() as c:
         c.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        migrer(c)
+
+
+# ---------------------------------------------------------------------------
+# Migrations idempotentes (bases créées avant l'ajout des colonnes)
+# ---------------------------------------------------------------------------
+COLONNES_AJOUTEES = [
+    # (table, colonne, définition)
+    ("seances_realisees", "lien_manuel", "INTEGER NOT NULL DEFAULT 0"),
+    ("seances_realisees", "verdict", "TEXT"),            # vert | orange | rouge | hors_plan
+    ("seances_realisees", "signaux", "TEXT"),            # JSON : signaux du dernier calcul
+]
+
+
+def _colonnes(c: sqlite3.Connection, table: str) -> set[str]:
+    return {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
+
+
+def migrer(c: sqlite3.Connection) -> None:
+    for table, colonne, definition in COLONNES_AJOUTEES:
+        if colonne not in _colonnes(c, table):
+            c.execute(f"ALTER TABLE {table} ADD COLUMN {colonne} {definition}")
 
 
 # ---------------------------------------------------------------------------
