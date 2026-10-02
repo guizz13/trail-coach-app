@@ -455,6 +455,30 @@ def totaux_semaine(lundi: date) -> dict:
     }
 
 
+def liaisons_actuelles() -> dict[int, int]:
+    return {r["id"]: r["seance_realisee_id"] for r in
+            db.fetch_all("SELECT id, seance_realisee_id FROM seances_planifiees WHERE seance_realisee_id IS NOT NULL")}
+
+
+def defaire_liaisons_incoherentes() -> list[dict]:
+    """Garde-fou : délie toute séance prévue liée à une séance réalisée d'une autre discipline
+    (héritage de l'ancien code, qui rangeait les types inconnus en course), puis recalcule les
+    semaines touchées. Appelé au démarrage et par le recalcul admin."""
+    lignes = db.fetch_all(
+        "SELECT p.id, p.type, p.date_seance, r.id AS realisee, r.famille FROM seances_planifiees p "
+        "JOIN seances_realisees r ON r.id = p.seance_realisee_id")
+    defaites = [l for l in lignes if famille_planifiee(l["type"]) != famille_realisee(l["famille"])]
+    if not defaites:
+        return []
+    with db.connexion() as c:
+        for l in defaites:
+            c.execute("UPDATE seances_planifiees SET seance_realisee_id = NULL WHERE id = ?", (l["id"],))
+            c.execute("UPDATE seances_realisees SET lien_manuel = 0 WHERE id = ?", (l["realisee"],))
+    for lundi in sorted({lundi_de(date.fromisoformat(l["date_seance"])) for l in defaites}):
+        recalculer_semaine(lundi)
+    return [{"planifiee": f"{l['type']} du {l['date_seance']}", "realisee": l["famille"]} for l in defaites]
+
+
 # ---------------------------------------------------------------------------
 # Liaison manuelle
 # ---------------------------------------------------------------------------
@@ -648,6 +672,8 @@ def recalculer_tout() -> dict:
     """Recalcul admin, sans LLM : remet à zéro les liaisons automatiques, relie tout l'historique,
     recalcule charges, statuts et verdicts. Les liaisons manuelles (lien_manuel=1) sont conservées."""
     horodatage = maintenant().isoformat(timespec="seconds")
+    liens_avant = liaisons_actuelles()
+    incoherentes = defaire_liaisons_incoherentes()
     with db.connexion() as c:
         c.execute("UPDATE seances_planifiees SET seance_realisee_id = NULL "
                   "WHERE seance_realisee_id IN (SELECT id FROM seances_realisees WHERE lien_manuel = 0)")
@@ -668,9 +694,16 @@ def recalculer_tout() -> dict:
         if avant != apres:
             changements.append({"seance_id": s["id"], "date": s["date_debut"][:10], "famille": s["famille"],
                                 "avant": avant, "apres": apres})
-    liees = db.fetch_one("SELECT COUNT(*) AS n FROM seances_planifiees WHERE seance_realisee_id IS NOT NULL")["n"]
+    liens_apres = liaisons_actuelles()
+    plan = {p["id"]: p for p in db.fetch_all("SELECT id, type, date_seance FROM seances_planifiees")}
+    familles = {s["id"]: s["famille"] for s in db.fetch_all("SELECT id, famille FROM seances_realisees")}
+    corrigees = [{"planifiee": f"{plan[i]['type']} du {plan[i]['date_seance']}",
+                  "avant": familles.get(liens_avant.get(i)), "apres": familles.get(liens_apres.get(i))}
+                 for i in sorted(set(liens_avant) | set(liens_apres))
+                 if liens_avant.get(i) != liens_apres.get(i) and i in plan]
     return {"seances": len(seances), "analyses_mises_a_jour": nb_analyses, "seances_sans_analyse": sans_analyse,
-            "seances_liees": liees, "changements": changements}
+            "seances_liees": len(liens_apres), "liaisons_corrigees": corrigees,
+            "liaisons_incoherentes_defaites": incoherentes, "changements": changements}
 
 
 recalculer_verdicts = recalculer_tout      # nom historique de la route admin

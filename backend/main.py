@@ -105,6 +105,7 @@ def _suite_sure(suite: Optional[str]) -> str:
 async def _cycle_de_vie(_: FastAPI):
     _mot_de_passe()
     db.init_db()
+    services.defaire_liaisons_incoherentes()     # garde-fou : jamais de liaison entre disciplines différentes
     yield
 
 

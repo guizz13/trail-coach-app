@@ -207,8 +207,9 @@ $("#recalculer").onclick = async () => {
   try {
     const r = await api("POST", "/api/admin/recalculate");
     const n = r.changements.length;
-    zone.textContent = `${r.analyses_mises_a_jour} analyse(s) recalculée(s), ${n} verdict(s) modifié(s)`
-      + (r.seances_sans_analyse ? ` · ${r.seances_sans_analyse} séance(s) sans analyse` : "") + ".";
+    const liens = (r.liaisons_corrigees || []).map(l => `${l.planifiee} : ${l.avant || "—"} → ${l.apres || "hors plan"}`);
+    zone.textContent = `${r.seances} séance(s) recalculée(s), ${n} verdict(s) modifié(s), ${liens.length} liaison(s) corrigée(s)`
+      + (liens.length ? ` (${liens.join(" ; ")})` : "") + ".";
     await charger();                                           // relecture des verdicts à jour
   } catch (e) { erreurSimple(zone, e); }
   finally { b.disabled = false; }

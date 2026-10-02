@@ -206,8 +206,8 @@ def test_recalcul_protege(anonyme):
 def test_recalcul_via_api(client):
     r = client.post("/api/admin/recalculate")
     assert r.status_code == 200
-    assert r.json() == {"seances": 0, "analyses_mises_a_jour": 0, "seances_sans_analyse": 0,
-                        "seances_liees": 0, "changements": []}
+    assert r.json() == {"seances": 0, "analyses_mises_a_jour": 0, "seances_sans_analyse": 0, "seances_liees": 0,
+                        "liaisons_corrigees": [], "liaisons_incoherentes_defaites": [], "changements": []}
 
 
 def test_acwr_non_expose_pendant_le_calibrage(client):
