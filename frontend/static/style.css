@@ -75,30 +75,24 @@ a { color: var(--accent-light); text-decoration: none; }
    reste réservé aux aplats, traits et icônes. */
 /* ---- Top bar --------------------------------------------------------------- */
 .topbar { display: flex; align-items: center; justify-content: space-between; height: 52px; }
-.logo-box {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.logo-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #8B5CF6, #5B21B6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: -apple-system, 'Hiragino Sans', 'Yu Gothic', sans-serif;
+.wordmark {
+  display: inline-flex;
+  align-items: baseline;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", Inter, system-ui, sans-serif;
   font-size: 18px;
   font-weight: 800;
-  color: #FFFFFF;
-}
-.logo-text {
-  font-size: 18px;
-  font-weight: 700;
   letter-spacing: 3px;
-  text-transform: uppercase;
+  line-height: 1;
   color: var(--accent-light);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.wordmark-s {
+  width: 0.72em;
+  height: 0.72em;
+  margin-right: 3px;
+  align-self: baseline;
+  transform: translateY(0.02em);
 }
 .avatar {
   width: 32px; height: 32px; border-radius: 50%; background: var(--bg-surface);

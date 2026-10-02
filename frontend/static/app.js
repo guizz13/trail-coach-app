@@ -118,10 +118,18 @@ function joursEntre(a, b) { return Math.round((dateLocale(b) - dateLocale(a)) / 
 const ONGLETS = [["/", "ti-calendar", "Semaine"], ["/import", "ti-upload", "Import"],
   ["/dimanche", "ti-adjustments", "Préparer"], ["/evenements", "ti-target", "Objectifs"], ["/historique", "ti-chart-line", "Stats"]];
 
+// Tracé du S de la marque (repris de logo-mark.svg)
+const TRACE_S = "M27 74 H57 Q72 74 72 61.5 Q72 50 57 50 H43 Q28 50 28 38.5 Q28 26 43 26 H62";
+
 function coque(droiteHTML = "") {
   const top = document.createElement("header");
   top.className = "topbar";
-  top.innerHTML = `<div class="logo-box"><div class="logo-icon" aria-hidden="true">先</div><span class="logo-text">Sensei</span></div>
+  // Le S du logo sert de première lettre : pas d'icône à côté, le lecteur d'écran lit « Sensei »
+  top.innerHTML = `<a href="/" class="wordmark" aria-label="Sensei">
+      <svg class="wordmark-s" viewBox="22.5 21.5 57 57" aria-hidden="true">
+        <path d="${TRACE_S}" fill="none" stroke="currentColor" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="74" cy="26" r="5.5" fill="currentColor"/>
+      </svg><span aria-hidden="true">ENSEI</span></a>
     <div id="topbar-droite">${droiteHTML}</div>`;
   $("main").prepend(top);
   const nav = document.createElement("nav");
