@@ -140,7 +140,7 @@ CREATE TABLE IF NOT EXISTS muscu_detail (
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS analyses_llm (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    type_appel      TEXT NOT NULL CHECK (type_appel IN ('analyse_seance','bilan_hebdo','reconstruction_evenements')),
+    type_appel      TEXT NOT NULL CHECK (type_appel IN ('analyse_seance','bilan_hebdo','reconstruction_evenements','ajustement_semaine')),
     seance_id       INTEGER REFERENCES seances_realisees(id),
     semaine_debut   TEXT,
     evenement_id    INTEGER REFERENCES evenements(id),

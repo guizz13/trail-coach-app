@@ -158,12 +158,18 @@ def test_evenements_crud(client):
     assert client.delete(f"/api/evenements/{id_}").status_code == 404
 
 
-def test_planifiee_edition(client):
-    p = client.post("/api/planifiees", json={"date_seance": "2026-09-29", "creneau": "week-end",
-                                             "type": "EF", "duree_min": "45"}).json()
+def test_planifiee_edition(client, monkeypatch):
+    import datetime as dt
+    import services
+    monkeypatch.setattr(services, "aujourdhui", lambda: dt.date(2026, 10, 2))
+    p = client.post("/api/seances_planifiees", json={"date_seance": "2026-09-29", "creneau": "week-end",
+                                                     "type": "EF", "duree_min": "45"}).json()["seance"]
     assert p["creneau"] == "journee" and p["version"] == 1
-    p2 = client.put(f"/api/planifiees/{p['id']}", json={"duree_min": 50}).json()
-    assert p2["version"] == 2 and p2["statut"] == "modifie" and p2["duree_min"] == 50
+    p2 = client.patch(f"/api/seances_planifiees/{p['id']}", json={"duree_min": 50}).json()["seance"]
+    assert p2["version"] == 2 and p2["statut"] == "manque" and p2["duree_min"] == 50   # mardi passé, rien de lié
+    # Hors de la semaine en cours : refusé
+    r = client.post("/api/seances_planifiees", json={"date_seance": "2026-10-06", "type": "EF"})
+    assert r.status_code == 422
 
 
 # ---- Routes LLM (sans LLM : dégradation propre) ------------------------------

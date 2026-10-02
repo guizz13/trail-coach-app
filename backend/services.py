@@ -329,6 +329,18 @@ def sante_profil(p: Optional[dict] = None) -> dict:
     return {"niveau": niveau, "zones": [], "note": note.strip() or None, "protocole": None}
 
 
+def texte_sante_llm(sante: dict) -> str:
+    """Contenu de <statut_sante> : niveau, zones, note et protocole kiné."""
+    morceaux = [f"niveau: {'100 %' if sante['niveau'] == '100' else sante['niveau']}"]
+    if sante.get("zones"):
+        morceaux.append("zones: " + ", ".join(sante["zones"]))
+    if sante.get("note"):
+        morceaux.append(f"note: {sante['note']}")
+    if sante.get("protocole"):
+        morceaux.append(f"protocole kiné: {sante['protocole']}")
+    return " | ".join(morceaux)
+
+
 # Mots qui, dans l'analyse du LLM, justifient une alerte de sécurité… ou la disqualifient
 _MOTS_SECURITE = ("douleur", "blessure", "récupération", "recovery")
 _MOTS_ACWR = ("acwr", "ratio", "charge chronique", "charge aiguë", "charge aigue")
@@ -384,13 +396,31 @@ def evaluer_et_stocker(seance: dict, horodatage: Optional[str] = None) -> tuple[
     return verdict, ancien
 
 
-def recalculer_semaine(lundi: date) -> None:
-    """Après tout changement (import, lier/délier, édition du plan) : liaison, statuts, verdicts."""
+def recalculer_semaine(lundi: date, modification: Optional[str] = None) -> dict:
+    """Après tout changement (import, lier/délier, édition du plan), sans LLM : liaison, statuts,
+    verdicts et totaux. `modification` (texte) marque le plan comme modifié par l'utilisateur."""
     dimanche = lundi + timedelta(days=6)
     relier(lundi, dimanche)
     mettre_a_jour_statuts(lundi, dimanche)
     for s in db.seances_entre(lundi.isoformat(), dimanche.isoformat()):
         evaluer_et_stocker(s)
+    if modification:
+        db.noter_modification(lundi.isoformat(), modification)
+    return totaux_semaine(lundi)
+
+
+def totaux_semaine(lundi: date) -> dict:
+    """Volume prévu vs réalisé (course) et distribution des zones de la semaine."""
+    du, au = lundi.isoformat(), (lundi + timedelta(days=6)).isoformat()
+    plan = [p for p in db.planifiees_entre(du, au) if famille_planifiee(p["type"]) == "course"]
+    course = db.seances_entre(du, au, familles=extractor.FAMILLE_COURSE)
+    return {
+        "course_prevue_min": sum(p["duree_min"] or 0 for p in plan),
+        "course_prevue_km": round(sum(p["distance_km"] or 0 for p in plan), 1),
+        "course_realisee_min": round(sum(s["duree_min"] or 0 for s in course)),
+        "course_realisee_km": round(sum(s["distance_km"] or 0 for s in course), 1),
+        "distribution": metrics.distribution_hebdo(course),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -691,7 +721,217 @@ def tableau_de_bord(d: Optional[date] = None) -> dict:
         "charge_semaine": round(metrics.charge_semaine(seances_sem), 1),
         "derniere_analyse": derniere,
         "cout_llm": cout_llm_mois(),
+        "ajustement": etat_ajustement(d),
     }
+
+
+# ---------------------------------------------------------------------------
+# Édition du plan de la semaine en cours (recalcul automatique, sans LLM)
+# ---------------------------------------------------------------------------
+class Refus(Exception):
+    """Action refusée en l'état (ex. supprimer une séance prévue déjà liée)."""
+
+
+def _verifier_semaine_courante(date_iso: str) -> date:
+    try:
+        d = date.fromisoformat(date_iso)
+    except (TypeError, ValueError):
+        raise ValueError("Date invalide (AAAA-MM-JJ).")
+    lundi = lundi_de(aujourdhui())
+    if not lundi <= d <= lundi + timedelta(days=6):
+        raise ValueError("Seules les séances de la semaine en cours peuvent être modifiées.")
+    return d
+
+
+def _libelle_seance(p: dict) -> str:
+    return f"{p['type']} du {jour_de(date.fromisoformat(p['date_seance']))} {p['creneau']}"
+
+
+def creer_planifiee(valeurs: dict) -> dict:
+    v = valider_planifiee({**valeurs, "statut": None})
+    _verifier_semaine_courante(v["date_seance"])
+    id_ = db.inserer("seances_planifiees", {**v, "origine": "manuel"})
+    p = db.planifiee(id_)
+    totaux = recalculer_semaine(lundi_de(date.fromisoformat(p["date_seance"])), f"Ajout : {_libelle_seance(p)}")
+    return {"seance": db.planifiee(id_), "totaux": totaux}
+
+
+def modifier_planifiee(id_: int, valeurs: dict) -> dict:
+    actuelle = db.planifiee(id_)
+    if not actuelle:
+        raise ValueError("Séance prévue introuvable.")
+    _verifier_semaine_courante(actuelle["date_seance"])
+    champs = ("date_seance", "creneau", "type", "duree_min", "distance_km", "detail", "intensite", "dplus_m")
+    v = valider_planifiee({**{k: actuelle[k] for k in champs}, **{k: valeurs[k] for k in champs if k in valeurs}})
+    _verifier_semaine_courante(v["date_seance"])
+    v["version"] = actuelle["version"] + 1
+    if actuelle["statut"] == "prevu":
+        v["statut"] = "modifie"
+    db.maj("seances_planifiees", id_, v)
+    apres = db.planifiee(id_)
+    diff = [f"{k} {actuelle[k]} → {apres[k]}" for k in ("date_seance", "creneau", "type", "duree_min", "distance_km")
+            if actuelle[k] != apres[k]]
+    texte = f"Modification : {_libelle_seance(actuelle)}" + (f" ({', '.join(diff)})" if diff else "")
+    totaux = recalculer_semaine(lundi_de(date.fromisoformat(apres["date_seance"])), texte)
+    return {"seance": db.planifiee(id_), "totaux": totaux}
+
+
+def supprimer_planifiee(id_: int) -> dict:
+    p = db.planifiee(id_)
+    if not p:
+        raise ValueError("Séance prévue introuvable.")
+    _verifier_semaine_courante(p["date_seance"])
+    if p["seance_realisee_id"]:
+        raise Refus("Cette séance prévue est liée à une séance réalisée : délie-la d'abord.")
+    db.supprimer("seances_planifiees", id_)
+    return {"ok": True, "totaux": recalculer_semaine(lundi_de(date.fromisoformat(p["date_seance"])),
+                                                    f"Suppression : {_libelle_seance(p)}")}
+
+
+# ---------------------------------------------------------------------------
+# Réajustement de la semaine par le LLM (à la demande)
+# ---------------------------------------------------------------------------
+TYPES_COURSE_LONGUE_MAX_MIN = 75
+MESSAGE_AJUSTEMENT_INVALIDE = "Sensei n'a pas trouvé d'ajustement valide, ton plan actuel est conservé."
+
+
+def _premier_jour_modifiable(d: date) -> date:
+    """Demain si quelque chose a déjà été réalisé aujourd'hui, sinon aujourd'hui."""
+    return d + timedelta(days=1) if db.seances_entre(d.isoformat(), d.isoformat()) else d
+
+
+def etat_ajustement(d: Optional[date] = None) -> dict:
+    d = d or aujourdhui()
+    lundi = lundi_de(d)
+    du, au = lundi.isoformat(), (lundi + timedelta(days=6)).isoformat()
+    etat = db.etat_semaine(du)
+    raisons = []
+    if etat["plan_modifie"]:
+        raisons.append("plan modifié")
+    if any(p["statut"] == "manque" for p in db.planifiees_entre(du, au)):
+        raisons.append("séance manquée")
+    if any(s.get("verdict") == "hors_plan" for s in db.seances_entre(du, au)):
+        raisons.append("séance hors plan")
+    premier = _premier_jour_modifiable(d)
+    return {"possible": bool(raisons) and premier <= lundi + timedelta(days=6), "raisons": raisons,
+            "plan_modifie": etat["plan_modifie"], "premier_jour": premier.isoformat()}
+
+
+def _seances_proposees(reponse: dict) -> dict[str, list[dict]]:
+    return {j.get("date"): [x for x in (j.get("seances") or []) if isinstance(x, dict)]
+            for j in reponse.get("jours") or [] if isinstance(j, dict)}
+
+
+def valider_ajustement(reponse: dict, lundi: date, premier: date) -> list[str]:
+    """Règles dures vérifiables en code, sur la semaine complète (réalisé + plan conservé + proposition)."""
+    violations = []
+    dimanche = lundi + timedelta(days=6)
+    proposes = _seances_proposees(reponse)
+    if not proposes:
+        return ["Aucun jour proposé."]
+    for d_iso in proposes:
+        try:
+            d = date.fromisoformat(d_iso or "")
+        except ValueError:
+            violations.append(f"Date invalide : {d_iso}.")
+            continue
+        if not premier <= d <= dimanche:
+            violations.append(f"Date {d_iso} hors des jours modifiables ({premier.isoformat()} → {dimanche.isoformat()}).")
+    activites: dict[date, list[tuple[str, Optional[float], str]]] = {}   # jour → (famille, durée, origine)
+    for i in range(7):
+        d = lundi + timedelta(days=i)
+        jour = []
+        for s in db.seances_entre(d.isoformat(), d.isoformat()):
+            if famille_realisee(s["famille"]):
+                jour.append((famille_realisee(s["famille"]), s["duree_min"], "realise"))
+        if d.isoformat() in proposes and d >= premier:
+            sources = [(x.get("type"), x.get("duree_min")) for x in proposes[d.isoformat()]]
+        else:
+            sources = [(p["type"], p["duree_min"]) for p in db.planifiees_entre(d.isoformat(), d.isoformat())
+                       if p["seance_realisee_id"] is None and p["statut"] != "manque"]
+        jour += [(famille_planifiee(t), m, "plan") for t, m in sources if famille_planifiee(t)]
+        activites[d] = jour
+    if all(activites[d] for d in activites):
+        violations.append("Aucun jour de repos complet sur la semaine.")
+    nb_muscu = sum(1 for j in activites.values() for f, _, _ in j if f == "muscu")
+    if nb_muscu < 2:
+        violations.append(f"{nb_muscu} séance(s) de musculation sur la semaine (minimum 2).")
+    for d, j in activites.items():
+        if d.weekday() >= 5:
+            continue
+        nom = jour_de(d)
+        if any(f == "course" and (m or 0) > TYPES_COURSE_LONGUE_MAX_MIN and o == "plan" for f, m, o in j):
+            violations.append(f"Course de plus de 1h15 en semaine ({nom}).")
+        if {"muscu", "course"} <= {f for f, _, _ in j}:
+            violations.append(f"Muscu et course le même jour en semaine ({nom}).")
+    return violations
+
+
+def ajuster_semaine() -> dict:
+    d = aujourdhui()
+    lundi = lundi_de(d)
+    dimanche = lundi + timedelta(days=6)
+    premier = _premier_jour_modifiable(d)
+    if premier > dimanche:
+        raise ValueError("Plus aucun jour à réajuster cette semaine.")
+    du, au = lundi.isoformat(), dimanche.isoformat()
+    p = db.profil()
+    imp = db.imperatifs(du) or {}
+    contexte = {
+        "semaine_du": du,
+        "premier_jour_modifiable": premier.isoformat(),
+        "jours_restants": [(premier + timedelta(days=i)).isoformat() for i in range((dimanche - premier).days + 1)],
+        "plan_actuel": [{**_planifiee_llm(x), "lie_a_une_seance_realisee": bool(x["seance_realisee_id"])}
+                        for x in db.planifiees_entre(du, au)],
+        "modifications": db.etat_semaine(du)["modifications"],
+        "realise": [{**_seance_llm(s), "verdict": s.get("verdict")} for s in db.seances_entre(du, au)],
+        "imperatifs": {k: imp.get(k) for k in ("squash_jours", "contraintes", "ressenti", "sommeil", "notes")},
+    }
+    erreur_precedente, analyse_id, violations = None, None, []
+    for _ in range(2):                         # un seul nouvel essai, avec l'erreur en contexte
+        ctx = {**contexte, **({"erreur_tentative_precedente": erreur_precedente} if erreur_precedente else {})}
+        reponse, erreur, trace = _appel_llm("ajustement_semaine", lambda llm: llm.ajustement_semaine(
+            contexte=ctx, profil=_profil_llm(p), statut_sante=texte_sante_llm(sante_profil(p)),
+            mode=p.get("mode_actif", "BASE")))
+        analyse_id = _tracer("ajustement_semaine", reponse, erreur, trace, semaine_debut=du)
+        if reponse is None:
+            return {"ok": False, "erreur_llm": erreur, "analyse_id": analyse_id}
+        violations = valider_ajustement(reponse, lundi, premier)
+        if not violations:
+            return {"ok": True, "analyse_id": analyse_id, "changements": reponse.get("changements") or [],
+                    "message_coach": reponse.get("message_coach"), "jours": reponse.get("jours")}
+        erreur_precedente = "Règles violées, corrige-les : " + " ; ".join(violations)
+    return {"ok": False, "message": MESSAGE_AJUSTEMENT_INVALIDE, "violations": violations, "analyse_id": analyse_id}
+
+
+def appliquer_ajustement(analyse_id: int) -> dict:
+    a = db.analyse(analyse_id)
+    if not a or a["type_appel"] != "ajustement_semaine" or not isinstance(a["reponse_json"], dict):
+        raise ValueError("Ajustement introuvable.")
+    d = aujourdhui()
+    lundi = lundi_de(d)
+    if a["semaine_debut"] != lundi.isoformat():
+        raise ValueError("Cet ajustement concerne une autre semaine.")
+    if a["valide_par_user"]:
+        raise ValueError("Ajustement déjà appliqué.")
+    premier = _premier_jour_modifiable(d)
+    violations = valider_ajustement(a["reponse_json"], lundi, premier)
+    if violations:                             # le réalisé a pu changer depuis l'aperçu
+        raise ValueError("Ajustement plus valide : " + " ; ".join(violations))
+    proposes = _seances_proposees(a["reponse_json"])
+    with db.connexion() as c:
+        for d_iso, seances in proposes.items():
+            # Les séances prévues non liées du jour sont remplacées ; les liées restent
+            c.execute("DELETE FROM seances_planifiees WHERE date_seance = ? AND seance_realisee_id IS NULL", (d_iso,))
+            for x in seances:
+                v = valider_planifiee({"date_seance": d_iso, "creneau": x.get("creneau"), "type": x.get("type"),
+                                       "duree_min": x.get("duree_min"), "distance_km": x.get("distance_km"),
+                                       "intensite": x.get("intensite"), "detail": x.get("description")})
+                db.inserer("seances_planifiees", {**v, "origine": "ajustement_semaine"}, conn=c)
+        c.execute("UPDATE analyses_llm SET valide_par_user = 1 WHERE id = ?", (analyse_id,))
+    totaux = recalculer_semaine(lundi)
+    db.plan_reajuste(lundi.isoformat())
+    return {"ok": True, "totaux": totaux}
 
 
 # ---------------------------------------------------------------------------
@@ -991,6 +1231,8 @@ def appliquer_ajustements(ajustements: list[dict], depuis: date) -> list[dict]:
                 "duree_min": _minutes(propose), "statut": "modifie", "origine": "analyse_seance",
             })
             resultats.append({**a, "applique": True, "seance_planifiee_id": id_, "ajoutee": True})
+    if any(r.get("applique") for r in resultats):
+        recalculer_semaine(lundi)          # liaison et statuts à jour (pas une modification utilisateur)
     return resultats
 
 
@@ -1108,6 +1350,8 @@ def bilan_hebdo(imperatifs: dict) -> dict:
         "d_plus_m": round(sum(s["dplus_m"] or 0 for s in course)),
         "charge_semaine": round(metrics.charge_semaine(ecoulee), 1),
         "seances_manquees": [_planifiee_llm(x) for x in plan if x["statut"] == "manque"],
+        # Le plan transmis est le plan tel que modifié ; voici ce qui a changé
+        "modifications_du_plan": db.etat_semaine(lundi_prec.isoformat())["modifications"],
     }
     imperatifs_llm = {
         "semaine_du": lundi.isoformat(),
@@ -1168,6 +1412,7 @@ def valider_semaine(analyse_id: int, seances: Optional[list[dict]] = None) -> di
         for l in lignes:
             db.inserer("seances_planifiees", l, conn=c)
         c.execute("UPDATE analyses_llm SET valide_par_user = 1 WHERE id = ?", (analyse_id,))
+    recalculer_semaine(lundi)
     return {"semaine_debut": lundi.isoformat(), "nb_seances": len(lignes),
             "avertissements": regles["avertissements"]}
 

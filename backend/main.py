@@ -377,29 +377,44 @@ def api_poids(valeurs: dict = Body(...)):
 
 
 # ---------------------------------------------------------------------------
-# API — séances planifiées (édition manuelle)
+# API — séances planifiées : édition de la semaine en cours (recalcul automatique, sans LLM)
 # ---------------------------------------------------------------------------
-@app.post("/api/planifiees")
+@app.exception_handler(services.Refus)
+def _refus(_: Request, e: services.Refus):
+    return JSONResponse({"detail": str(e)}, status_code=409)
+
+
+@app.post("/api/seances_planifiees")
+@app.post("/api/planifiees")                      # ancien chemin, même logique
 def api_planifiee_creer(p: dict = Body(...)):
-    v = services.valider_planifiee(p)
-    return db.planifiee(db.inserer("seances_planifiees", {**v, "origine": "manuel"}))
+    return services.creer_planifiee(p)
 
 
+@app.patch("/api/seances_planifiees/{id_}")
 @app.put("/api/planifiees/{id_}")
 def api_planifiee_maj(id_: int, p: dict = Body(...)):
-    actuelle = _ou_404(db.planifiee(id_), "Séance planifiée")
-    v = services.valider_planifiee({**actuelle, "statut": None, **p})
-    v["version"] = actuelle["version"] + 1
-    v.setdefault("statut", "modifie" if actuelle["statut"] == "prevu" else actuelle["statut"])
-    db.maj("seances_planifiees", id_, v)
-    return db.planifiee(id_)
+    _ou_404(db.planifiee(id_), "Séance planifiée")
+    return services.modifier_planifiee(id_, p)
 
 
+@app.delete("/api/seances_planifiees/{id_}")
 @app.delete("/api/planifiees/{id_}")
 def api_planifiee_supprimer(id_: int):
     _ou_404(db.planifiee(id_), "Séance planifiée")
-    db.supprimer("seances_planifiees", id_)
-    return {"ok": True}
+    return services.supprimer_planifiee(id_)
+
+
+# ---------------------------------------------------------------------------
+# API — réajustement de la semaine par Sensei (LLM, à la demande)
+# ---------------------------------------------------------------------------
+@app.post("/api/semaine/ajuster")
+def api_semaine_ajuster():
+    return services.ajuster_semaine()
+
+
+@app.post("/api/semaine/ajustements/{id_}/appliquer")
+def api_semaine_appliquer(id_: int):
+    return services.appliquer_ajustement(id_)
 
 
 # ---------------------------------------------------------------------------

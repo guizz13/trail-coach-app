@@ -5,6 +5,7 @@ Trois types d'appels, tous en JSON strict (voir prompts/system_prompt_coach.md �
   - analyse_seance             → à chaque import de fichier
   - bilan_hebdo                → chaque dimanche
   - reconstruction_evenements  → à chaque ajout/modification d'événement
+  - ajustement_semaine         → à la demande, après modification de la semaine
 
 Stratégie de coût :
   - System prompt mis en cache (cache_control) → 10 % du prix input aux appels suivants
@@ -33,6 +34,7 @@ MODELE_PAR_APPEL = {
     "analyse_seance": "claude-sonnet-5",
     "bilan_hebdo": "claude-fable-5-1",
     "reconstruction_evenements": "claude-fable-5-1",
+    "ajustement_semaine": "claude-sonnet-5",
 }
 
 # Tarifs USD par million de tokens (à mettre à jour si Anthropic change)
@@ -48,6 +50,7 @@ MAX_TOKENS_PAR_APPEL = {
     "analyse_seance": 16000,
     "bilan_hebdo": 16000,
     "reconstruction_evenements": 16000,
+    "ajustement_semaine": 8000,
 }
 
 PLAFOND_MENSUEL_USD = 5.0
@@ -138,6 +141,10 @@ class CoachLLM:
             "plan_prepa_actuel": plan_actuel,
         }
         return self._appel("reconstruction_evenements", ctx, profil, statut_sante, mode)
+
+    def ajustement_semaine(self, contexte: dict, profil: dict, statut_sante: str, mode: str) -> dict:
+        """Réajuste les jours restants de la semaine (plan actuel, modifications, réalisé, jours restants)."""
+        return self._appel("ajustement_semaine", contexte, profil, statut_sante, mode)
 
     # ---- Cœur ------------------------------------------------------------
     def _appel(self, type_appel: str, contexte: dict, profil: dict,

@@ -26,6 +26,8 @@ async function charger(lundi) {
     rendreForme(courante, realisees, dimanche);
     rendreVolume(courante, realisees);
     rendrePlanning(jours, realisees, verdicts);
+    rendreReajuster(courante);
+    $("#ajouter").classList.toggle("hidden", !courante);   // ajout : semaine en cours uniquement
   } catch (e) { erreurSimple($("#planning"), e); }
 }
 
@@ -170,15 +172,26 @@ function rendrePlanning(jours, realisees, verdicts) {
 }
 
 // ---- Édition d'une séance planifiée (feuille) --------------------------------
+// Modifiable uniquement dans la semaine en cours ; le statut est recalculé (jamais saisi)
+const dansSemaineCourante = iso => tableau && iso >= tableau.lundi && iso <= ajouterJours(tableau.lundi, 6);
+
 function editer(p, realisee) {
+  if (p.id && !dansSemaineCourante(p.date_seance)) {
+    feuille(`<h2>${esc(libelleType(p.type))}</h2>
+      <div class="sous-texte">${esc(dateFR(p.date_seance, { weekday: "long", day: "numeric", month: "long" }))} · ${esc(CRENEAUX[p.creneau] || p.creneau)} · ${esc(STATUTS[p.statut] || p.statut)}</div>
+      ${p.detail ? `<p class="secondaire">${esc(p.detail)}</p>` : ""}
+      ${realisee ? `<a class="btn petit" style="margin-top:10px" href="/historique#${realisee.id}"><i class="ti ti-chart-line"></i>Voir la séance réalisée</a>` : ""}
+      <div class="sous-texte" style="margin-top:12px">Seules les séances de la semaine en cours se modifient.</div>`);
+    return;
+  }
   const types = TYPES_PLANIFIABLES.includes(p.type) ? TYPES_PLANIFIABLES : [p.type, ...TYPES_PLANIFIABLES];
   const opt = (liste, v, lib = {}) => liste.map(x => `<option value="${esc(x)}" ${x === v ? "selected" : ""}>${esc(lib[x] || x)}</option>`).join("");
   const d = feuille(`<h2>${p.id ? "Modifier la séance" : "Nouvelle séance"}</h2>
-    ${p.version ? `<div class="sous-texte">version ${p.version} · ${esc(p.origine || "")}</div>` : ""}
+    ${p.version ? `<div class="sous-texte">version ${p.version} · ${esc(p.origine || "")} · ${esc(STATUTS[p.statut] || p.statut)}</div>` : ""}
     ${realisee ? `<a class="btn petit" style="margin-top:10px" href="/historique#${realisee.id}"><i class="ti ti-chart-line"></i>Voir la séance réalisée</a>` : ""}
     <form>
       <div class="champs-2">
-        <div><label>Date</label><input type="date" name="date_seance" value="${esc(p.date_seance)}" required></div>
+        <div><label>Date</label><input type="date" name="date_seance" value="${esc(p.date_seance)}" min="${tableau.lundi}" max="${ajouterJours(tableau.lundi, 6)}" required></div>
         <div><label>Créneau</label><select name="creneau">${opt(Object.keys(CRENEAUX), p.creneau || "matin", CRENEAUX)}</select></div>
       </div>
       <label>Type</label><select name="type">${opt(types, p.type || "EF", TYPES)}</select>
@@ -186,8 +199,7 @@ function editer(p, realisee) {
         <div><label>Durée (min)</label><input type="number" inputmode="numeric" name="duree_min" value="${esc(p.duree_min ?? "")}"></div>
         <div><label>Distance (km)</label><input type="number" inputmode="decimal" step="0.1" name="distance_km" value="${esc(p.distance_km ?? "")}"></div>
       </div>
-      <label>Statut</label><select name="statut">${opt(Object.keys(STATUTS), p.statut || "prevu", STATUTS)}</select>
-      <label>Détail</label><textarea name="detail">${esc(p.detail ?? "")}</textarea>
+      <label>Description</label><textarea name="detail">${esc(p.detail ?? "")}</textarea>
       <label>Intensité</label><input name="intensite" value="${esc(p.intensite ?? "")}">
       <div class="erreur"></div>
       <div class="boutons">${p.id ? `<button type="button" class="btn danger" data-suppr>Supprimer</button>` : ""}
@@ -197,15 +209,52 @@ function editer(p, realisee) {
     e.preventDefault();
     const v = Object.fromEntries(new FormData(e.target));
     try {
-      if (p.id) await api("PUT", `/api/planifiees/${p.id}`, v); else await api("POST", "/api/planifiees", v);
+      if (p.id) await api("PATCH", `/api/seances_planifiees/${p.id}`, v); else await api("POST", "/api/seances_planifiees", v);
       d.close(); recharger();
     } catch (err) { erreurSimple($(".erreur", d), err); }
   };
   const s = $("[data-suppr]", d);
   if (s) s.onclick = async () => {
     if (!confirm("Supprimer cette séance ?")) return;
-    try { await api("DELETE", `/api/planifiees/${p.id}`); d.close(); recharger(); } catch (err) { erreurSimple($(".erreur", d), err); }
+    try { await api("DELETE", `/api/seances_planifiees/${p.id}`); d.close(); recharger(); }
+    catch (err) { erreurSimple($(".erreur", d), err); }    // liée : « délie-la d'abord »
   };
+}
+
+// ---- Réajuster avec Sensei (LLM, à la demande) ------------------------------------------------------------
+const MESSAGES_AJUSTEMENT = ["Sensei relit ta semaine...", "Prise en compte du réalisé...", "Vérification des règles...", "Réajustement des jours restants..."];
+
+function rendreReajuster(courante) {
+  const el = $("#reajuster"), a = tableau.ajustement, c = tableau.cout_llm;
+  if (!courante || !a || !a.possible) { el.innerHTML = ""; return; }
+  const budget = c.cout_usd >= c.plafond_usd;
+  el.innerHTML = `<button type="button" class="btn" id="btn-reajuster" style="margin-top:8px" ${budget ? "disabled" : ""}>
+      <i class="ti ti-wand"></i>${budget ? "Budget IA du mois atteint" : "Réajuster avec Sensei"}</button>
+    <div class="sous-texte" style="text-align:center;margin-top:4px">${esc(a.raisons.join(" · "))}</div>
+    <div id="apercu-ajustement"></div>`;
+  if (!budget) $("#btn-reajuster").onclick = reajuster;
+}
+
+async function reajuster() {
+  const zone = $("#apercu-ajustement"), bouton = $("#btn-reajuster");
+  bouton.disabled = true;
+  chargeurIA(zone, MESSAGES_AJUSTEMENT);
+  try {
+    const r = await api("POST", "/api/semaine/ajuster");
+    if (r.erreur_llm) { zone.innerHTML = ""; zone.appendChild(carteErreurLLM(r.erreur_llm, reajuster)); return; }
+    if (!r.ok) { zone.innerHTML = `<div class="bandeau gris">${esc(r.message)}</div>`; return; }
+    zone.innerHTML = `${messageCoach(r.message_coach, "Proposition de Sensei")}
+      <div class="carte" style="margin-top:8px"><div class="metrique"><span class="label">Changements</span></div>
+        ${(r.changements || []).map(x => `<div class="seance-detail" style="-webkit-line-clamp:unset;margin-top:6px">· ${esc(x)}</div>`).join("") || `<div class="vide">Aucun changement listé.</div>`}
+      </div>
+      <div class="boutons"><button type="button" class="btn" data-annuler>Annuler</button><button type="button" class="btn principal" data-appliquer>Appliquer</button></div>`;
+    $("[data-annuler]", zone).onclick = () => { zone.innerHTML = ""; bouton.disabled = false; };
+    $("[data-appliquer]", zone).onclick = async () => {
+      try { await api("POST", `/api/semaine/ajustements/${r.analyse_id}/appliquer`); recharger(); }
+      catch (e) { erreurSimple(zone, e); }
+    };
+  } catch (e) { zone.innerHTML = ""; zone.appendChild(carteErreurLLM({ type: "reseau", message: e.message }, reajuster)); }
+  finally { if (!zone.querySelector("[data-appliquer]")) bouton.disabled = false; }
 }
 
 function recharger() { const l = lundiAffiche; tableau = null; charger(l); }

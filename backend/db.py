@@ -21,7 +21,7 @@ COLONNES_JSON = {
     "temps_zones_s", "temps_zones_pct", "donnees_brutes",
     "groupes", "charges",
     "squash_jours", "contraintes",
-    "reponse_json", "signaux",
+    "reponse_json", "signaux", "modifications",
 }
 
 
@@ -75,6 +75,8 @@ COLONNES_AJOUTEES = [
     ("seances_realisees", "signaux", "TEXT"),            # JSON : signaux du dernier calcul
     ("seances_realisees", "douleur", "INTEGER"),         # douleur déclarée /10 (facultative)
     ("seances_realisees", "douleur_zone", "TEXT"),
+    ("imperatifs_semaine", "plan_modifie", "INTEGER NOT NULL DEFAULT 0"),
+    ("imperatifs_semaine", "modifications", "TEXT"),     # JSON : modifications faites par l'utilisateur
 ]
 
 
@@ -86,6 +88,42 @@ def migrer(c: sqlite3.Connection) -> None:
     for table, colonne, definition in COLONNES_AJOUTEES:
         if colonne not in _colonnes(c, table):
             c.execute(f"ALTER TABLE {table} ADD COLUMN {colonne} {definition}")
+    _elargir_types_appel(c)
+
+
+def _elargir_types_appel(c: sqlite3.Connection) -> None:
+    """SQLite ne sait pas modifier une contrainte CHECK : la table analyses_llm est reconstruite
+    (même colonnes, mêmes données) pour accepter le type d'appel « ajustement_semaine »."""
+    sql = c.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'analyses_llm'").fetchone()[0]
+    if "ajustement_semaine" in sql:
+        return
+    colonnes = ", ".join(r[1] for r in c.execute("PRAGMA table_info(analyses_llm)"))
+    c.execute("ALTER TABLE analyses_llm RENAME TO analyses_llm_ancienne")
+    c.execute(sql.replace("'reconstruction_evenements')", "'reconstruction_evenements','ajustement_semaine')"))
+    c.execute(f"INSERT INTO analyses_llm ({colonnes}) SELECT {colonnes} FROM analyses_llm_ancienne")
+    c.execute("DROP TABLE analyses_llm_ancienne")
+
+
+# ---------------------------------------------------------------------------
+# État de la semaine (plan modifié par l'utilisateur)
+# ---------------------------------------------------------------------------
+def etat_semaine(lundi: str) -> dict:
+    r = fetch_one("SELECT plan_modifie, modifications FROM imperatifs_semaine WHERE semaine_debut = ?", (lundi,))
+    return {"plan_modifie": bool(r and r["plan_modifie"]), "modifications": (r and r["modifications"]) or []}
+
+
+def noter_modification(lundi: str, modification: str) -> None:
+    etat = etat_semaine(lundi)
+    mods = etat["modifications"] + [modification]
+    with connexion() as c:
+        c.execute("INSERT INTO imperatifs_semaine (semaine_debut, plan_modifie, modifications) VALUES (?, 1, ?) "
+                  "ON CONFLICT(semaine_debut) DO UPDATE SET plan_modifie = 1, modifications = excluded.modifications",
+                  (lundi, json.dumps(mods, ensure_ascii=False)))
+
+
+def plan_reajuste(lundi: str) -> None:
+    with connexion() as c:
+        c.execute("UPDATE imperatifs_semaine SET plan_modifie = 0 WHERE semaine_debut = ?", (lundi,))
 
 
 # ---------------------------------------------------------------------------
