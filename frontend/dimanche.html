@@ -44,11 +44,17 @@
     <div class="section-label">Statut santé</div>
     <div class="carte">
       <div class="segments" id="sante">
-        <button type="button" data-v="100%" class="actif">100 %</button>
+        <button type="button" data-v="100" class="actif">100 %</button>
         <button type="button" data-v="vigilance">Vigilance</button>
         <button type="button" data-v="blessure">Blessure</button>
       </div>
-      <div id="zone-sante" class="hidden"><label>Zone concernée</label><input name="zone" placeholder="ex. achille gauche"></div>
+      <div id="zone-sante" class="hidden">
+        <label>Zones</label><div class="chips" id="zones-sante"></div>
+      </div>
+      <label>Note (facultative)</label><textarea name="sante_note" placeholder="ex. gêne au réveil, disparaît après 10 min"></textarea>
+      <label>Protocole kiné (facultatif)</label>
+      <textarea name="sante_protocole" placeholder="ex. : course 30 min max, +5 min par semaine si 0 douleur J+1"></textarea>
+      <div class="sous-texte">Si un protocole est renseigné, Sensei le suit à la lettre.</div>
     </div>
 
     <div class="section-label">Notes</div>

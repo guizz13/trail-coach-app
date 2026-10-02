@@ -35,7 +35,7 @@ function rendreEntete(dimanche) {
   const memeMois = lundiAffiche.slice(5, 7) === dimanche.slice(5, 7);
   $("#titre-semaine").textContent = `Semaine du ${dateFR(lundiAffiche, memeMois ? { day: "numeric" } : { day: "numeric", month: "short" })} — ${dateFR(dimanche, { day: "numeric", month: "short" })}`;
 
-  const p = tableau.profil, a = tableau.prochain_a, sante = p.statut_sante || "100%";
+  const p = tableau.profil, a = tableau.prochain_a;
   const badges = [];
   if (p.mode_actif === "RACE_PREP") badges.push(`<span class="badge prepa">${esc(libelleMode(p, a))}${a ? ` J-${a.dans_jours}` : ""}</span>`);
   else {
@@ -43,10 +43,10 @@ function rendreEntete(dimanche) {
     if (a) badges.push(`<span class="badge orange">${esc(a.titre)} J-${a.dans_jours}</span>`);
   }
   if (tableau.phase) badges.push(`<span class="badge">${esc(PHASES[tableau.phase.phase] || tableau.phase.phase)}</span>`);
-  const [niveau, zone] = sante.split(":");
-  badges.push(niveau === "100%" ? `<span class="badge vert">Santé 100%</span>`
-    : `<span class="badge ${niveau === "blessure" ? "rouge" : "orange"}">${niveau === "blessure" ? "Blessure" : "Vigilance"} ${esc(zone || "")}</span>`);
+  const sante = tableau.sante;
+  badges.push(`<button type="button" class="badge ${esc(sante.couleur)}" id="pastille-sante">${esc(sante.texte)}</button>`);
   $("#badges").innerHTML = badges.join("");
+  $("#pastille-sante").onclick = () => feuilleSante(sante);
 }
 
 // Objectif A ou B dans les 28 prochains jours : carte sous les badges, sinon rien

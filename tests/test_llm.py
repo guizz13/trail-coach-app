@@ -87,7 +87,7 @@ def test_analyse_ajustements_appliques(monkeypatch):
     assert ctx["prevu"]["type"] == "EF"
     assert "acwr" not in ctx["indicateurs"] and "distribution_semaine" in ctx["indicateurs"]
     assert "donnees_brutes" not in ctx["seance"]
-    assert ctx["mode"] == "BASE" and ctx["statut_sante"] == "100%"
+    assert ctx["mode"] == "BASE" and ctx["statut_sante"] == "niveau: 100 %"
 
     # Trace en base avec tokens et coût
     a = db.analyse(r["analyse_id"])
@@ -225,7 +225,8 @@ def test_bilan_puis_validation(monkeypatch):
                               "contraintes": [{"jour": "jeudi", "creneau": "soir", "raison": "réunion"}],
                               "ressenti": 7, "sommeil": 6, "statut_sante": "vigilance:achille gauche"})
     assert r["regles"]["bloquantes"] == []
-    assert db.profil()["statut_sante"] == "vigilance:achille gauche"
+    assert services.sante_profil() == {"niveau": "vigilance", "zones": ["Achille G"], "note": "achille gauche",
+                                       "protocole": None}
     assert db.imperatifs("2026-09-28")["contraintes"][0]["raison"] == "réunion"
 
     _, ctx = faux.appels[0]

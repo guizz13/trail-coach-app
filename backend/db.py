@@ -21,7 +21,7 @@ COLONNES_JSON = {
     "temps_zones_s", "temps_zones_pct", "donnees_brutes",
     "groupes", "charges",
     "squash_jours", "contraintes",
-    "reponse_json", "signaux", "modifications",
+    "reponse_json", "signaux", "modifications", "sante_zones",
 }
 
 
@@ -77,6 +77,10 @@ COLONNES_AJOUTEES = [
     ("seances_realisees", "douleur_zone", "TEXT"),
     ("imperatifs_semaine", "plan_modifie", "INTEGER NOT NULL DEFAULT 0"),
     ("imperatifs_semaine", "modifications", "TEXT"),     # JSON : modifications faites par l'utilisateur
+    ("profil", "sante_niveau", "TEXT NOT NULL DEFAULT '100'"),   # '100' | 'vigilance' | 'blessure'
+    ("profil", "sante_zones", "TEXT NOT NULL DEFAULT '[]'"),     # JSON array
+    ("profil", "sante_note", "TEXT"),
+    ("profil", "sante_protocole", "TEXT"),                       # consignes du kiné
 ]
 
 
@@ -85,10 +89,45 @@ def _colonnes(c: sqlite3.Connection, table: str) -> set[str]:
 
 
 def migrer(c: sqlite3.Connection) -> None:
+    sante_a_convertir = "sante_niveau" not in _colonnes(c, "profil")
     for table, colonne, definition in COLONNES_AJOUTEES:
         if colonne not in _colonnes(c, table):
             c.execute(f"ALTER TABLE {table} ADD COLUMN {colonne} {definition}")
+    if sante_a_convertir:
+        _convertir_sante(c)
     _elargir_types_appel(c)
+
+
+ZONES_SANTE = ["Achille G", "Achille D", "Fascia G", "Fascia D", "Mollet G", "Mollet D",
+               "Genou G", "Genou D", "Hanche", "Dos", "Épaule", "Autre"]
+
+
+def zones_depuis_texte(texte: str) -> list[str]:
+    """« achille gauche et droit » → [Achille G, Achille D] ; reconnaissance simple par mots-clés."""
+    t = (texte or "").lower()
+    zones = []
+    for nom, mots in (("Achille", ("achille",)), ("Fascia", ("fascia", "aponévr", "aponevr")),
+                      ("Mollet", ("mollet",)), ("Genou", ("genou",))):
+        if any(m in t for m in mots):
+            cotes = [c for c, m in (("G", "gauche"), ("D", "droit")) if m in t] or ["G", "D"]
+            zones += [f"{nom} {c}" for c in cotes]
+    for nom, mot in (("Hanche", "hanche"), ("Dos", "dos"), ("Épaule", "paule")):
+        if mot in t:
+            zones.append(nom)
+    return zones
+
+
+def _convertir_sante(c: sqlite3.Connection) -> None:
+    """Ancien statut texte (« vigilance:achille gauche ») → niveau + zones reconnues + note."""
+    r = c.execute("SELECT statut_sante, notes_sante FROM profil WHERE id = 1").fetchone()
+    if not r:
+        return
+    brut = (r[0] or "100%").strip()
+    niveau = "blessure" if "blessure" in brut.lower() else "vigilance" if "vigilance" in brut.lower() else "100"
+    note = brut.partition(":")[2].strip() if niveau != "100" else None
+    note = " — ".join(x for x in (note, r[1]) if x) or None
+    c.execute("UPDATE profil SET sante_niveau = ?, sante_zones = ?, sante_note = ? WHERE id = 1",
+              (niveau, json.dumps(zones_depuis_texte(note or "") if niveau != "100" else [], ensure_ascii=False), note))
 
 
 def _elargir_types_appel(c: sqlite3.Connection) -> None:

@@ -65,7 +65,19 @@ const TYPES_EVT = { trail_race: "Trail", squash_competition: "Compétition squas
 const APPELS = { analyse_seance: "Analyse", bilan_hebdo: "Bilan", reconstruction_evenements: "Reconstruction du plan" };
 const SPLITS = { push_a: "Push A", pull_a: "Pull A", push_b: "Push B", pull_b: "Pull B", jambes: "Jambes", autre: "Autre" };
 const CRENEAUX = { matin: "matin", midi: "midi", soir: "soir", journee: "journée" };
-const PHASES = { BASE: "Base", BUILD: "Build", PIC: "Pic", AFFUTAGE: "Affûtage" };
+const PHASES = { BASE: "Base", BUILD: "Build", PIC: "Pic", AFFUTAGE: "Affûtage", LIBRE: "Libre" };
+const NIVEAUX_SANTE = { "100": "100 %", vigilance: "Vigilance", blessure: "Blessure" };
+
+// Détail complet du statut santé (tap sur la pastille)
+function feuilleSante(s) {
+  feuille(`<h2>Statut santé</h2>
+    <div class="pill-row" style="margin-top:8px"><span class="badge ${esc(s.couleur)}">${esc(NIVEAUX_SANTE[s.niveau] || s.niveau)}</span>
+      ${(s.zones || []).map(z => `<span class="badge">${esc(z)}</span>`).join("")}</div>
+    ${s.note ? `<div class="section-label">Note</div><p class="secondaire" style="margin:0">${esc(s.note)}</p>` : ""}
+    ${s.protocole ? `<div class="section-label">Protocole kiné</div><p class="secondaire" style="margin:0">${esc(s.protocole)}</p>` : ""}
+    ${!s.note && !s.protocole && s.niveau === "100" ? `<p class="secondaire">Aucune restriction.</p>` : ""}
+    <a class="btn petit" href="/dimanche" style="margin-top:14px"><i class="ti ti-adjustments"></i>Modifier dans Préparer</a>`);
+}
 const GROUPES = { pectoraux: "Pectoraux", triceps: "Triceps", epaules: "Épaules", dos: "Dos", biceps: "Biceps",
   cuisses: "Cuisses", ischios: "Ischios", mollets: "Mollets", abdos: "Abdos" };
 

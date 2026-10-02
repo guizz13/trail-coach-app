@@ -329,6 +329,38 @@ def sante_profil(p: Optional[dict] = None) -> dict:
     return {"niveau": niveau, "zones": [], "note": note.strip() or None, "protocole": None}
 
 
+NIVEAUX_SANTE = ("100", "vigilance", "blessure")
+
+
+def sante_libelle_court(sante: dict) -> dict:
+    """Pastille courte : « Santé 100 % », « Vigilance · Achille D+G », « Blessure · 3 zones »."""
+    niveau, zones = sante.get("niveau") or "100", sante.get("zones") or []
+    if niveau == "100":
+        return {"texte": "Santé 100 %", "couleur": "vert"}
+    if len(zones) > 2:
+        detail = f"{len(zones)} zones"
+    else:
+        groupes: dict[str, list[str]] = {}
+        for z in zones:
+            base, _, cote = z.rpartition(" ") if z.endswith((" G", " D")) else (z, "", "")
+            groupes.setdefault(base, []).append(cote)
+        detail = " · ".join(f"{b} {'+'.join(sorted(c for c in cotes if c))}".strip() for b, cotes in groupes.items())
+    texte = ("Vigilance" if niveau == "vigilance" else "Blessure") + (f" · {detail}" if zones else "")
+    return {"texte": texte, "couleur": "orange" if niveau == "vigilance" else "rouge"}
+
+
+def enregistrer_sante(sante: dict) -> dict:
+    niveau = sante.get("niveau") or "100"
+    if niveau not in NIVEAUX_SANTE:
+        raise ValueError("Niveau de santé invalide : 100, vigilance ou blessure.")
+    zones = [z for z in (sante.get("zones") or []) if z in db.ZONES_SANTE] if niveau != "100" else []
+    note = (sante.get("note") or "").strip() or None
+    protocole = (sante.get("protocole") or "").strip() or None
+    db.maj_profil(sante_niveau=niveau, sante_zones=zones, sante_note=note, sante_protocole=protocole,
+                  statut_sante="100%" if niveau == "100" else f"{niveau}:{', '.join(zones) or note or ''}")
+    return sante_profil()
+
+
 def texte_sante_llm(sante: dict) -> str:
     """Contenu de <statut_sante> : niveau, zones, note et protocole kiné."""
     morceaux = [f"niveau: {'100 %' if sante['niveau'] == '100' else sante['niveau']}"]
@@ -574,7 +606,7 @@ def importer_et_analyser(fichier_bytes: bytes, nom: str, muscu_detail: Optional[
             "analyse_seance", lambda llm: llm.analyse_seance(
                 seance=seance_llm, prevu=prevu and _planifiee_llm(prevu), semaine=reste,
                 indicateurs={**indicateurs, "verdict_calcule": verdict},   # pas d'ACWR : il ne juge pas une séance
-                profil=_profil_llm(p), statut_sante=p.get("statut_sante", "100%"), mode=p.get("mode_actif", "BASE")))
+                profil=_profil_llm(p), statut_sante=texte_sante_llm(sante_profil(p)), mode=p.get("mode_actif", "BASE")))
         if reponse is not None:
             verdict = verdict_final(verdict, reponse)
         analyse_id = _tracer("analyse_seance", reponse, erreur, trace, verdict=verdict, seance_id=seance_id)
@@ -722,6 +754,7 @@ def tableau_de_bord(d: Optional[date] = None) -> dict:
         "derniere_analyse": derniere,
         "cout_llm": cout_llm_mois(),
         "ajustement": etat_ajustement(d),
+        "sante": {**sante_profil(), **sante_libelle_court(sante_profil())},
     }
 
 
@@ -1316,9 +1349,15 @@ def bilan_hebdo(imperatifs: dict) -> dict:
     dimanche_prec = lundi - timedelta(days=1)
 
     # 1. Impératifs
-    statut = (imperatifs.get("statut_sante") or "100%").strip()
-    if not (statut == "100%" or statut.startswith(("vigilance:", "blessure:"))):
-        raise ValueError("Statut santé invalide : '100%', 'vigilance:<zone>' ou 'blessure:<zone>'.")
+    if isinstance(imperatifs.get("sante"), dict):
+        nouvelle_sante = imperatifs["sante"]
+    else:                                          # ancien format « vigilance:<zone> »
+        statut = (imperatifs.get("statut_sante") or "100%").strip()
+        if not (statut == "100%" or statut.startswith(("vigilance:", "blessure:"))):
+            raise ValueError("Statut santé invalide : '100%', 'vigilance:<zone>' ou 'blessure:<zone>'.")
+        niveau, _, note = statut.partition(":")
+        nouvelle_sante = {"niveau": "100" if statut == "100%" else niveau,
+                          "zones": db.zones_depuis_texte(note), "note": note or None}
     for k in ("ressenti", "sommeil"):
         v = imperatifs.get(k)
         if v not in (None, "") and not 1 <= int(v) <= 10:
@@ -1330,7 +1369,8 @@ def bilan_hebdo(imperatifs: dict) -> dict:
         "sommeil": int(imperatifs["sommeil"]) if imperatifs.get("sommeil") else None,
         "notes": (imperatifs.get("notes") or "").strip() or None,
     })
-    db.maj_profil(statut_sante=statut)
+    sante = enregistrer_sante(nouvelle_sante)
+    statut = texte_sante_llm(sante)
 
     # 2. Chargement
     marquer_manquees(aujourdhui())
@@ -1371,6 +1411,10 @@ def bilan_hebdo(imperatifs: dict) -> dict:
         statut_sante=statut, mode=p.get("mode_actif", "BASE"), phase_prepa=phase))
     analyse_id = _tracer("bilan_hebdo", reponse, erreur, trace, semaine_debut=lundi.isoformat())
 
+    # Phase de prépa : code fermé, le texte libre passe dans « detail »
+    if reponse is not None and isinstance(reponse.get("position_prepa"), dict):
+        reponse["position_prepa"] = normaliser_position_prepa(reponse["position_prepa"])
+
     # Double sécurité : règles dures
     regles = None
     if reponse is not None:
@@ -1379,6 +1423,23 @@ def bilan_hebdo(imperatifs: dict) -> dict:
 
     return {"analyse_id": analyse_id, "semaine_debut": lundi.isoformat(), "indicateurs": indicateurs,
             "reponse": reponse, "erreur_llm": erreur, "regles": regles, "cout": trace["cout_usd"]}
+
+
+PHASES_PREPA = ("BASE", "BUILD", "PIC", "AFFUTAGE", "LIBRE")
+_MOTS_PHASE = [("affût", "AFFUTAGE"), ("affut", "AFFUTAGE"), ("taper", "AFFUTAGE"), ("pic", "PIC"), ("peak", "PIC"),
+               ("build", "BUILD"), ("construction", "BUILD"), ("spécifique", "BUILD"), ("specifique", "BUILD"),
+               ("base", "BASE"), ("reprise", "BASE"), ("foncier", "BASE"), ("libre", "LIBRE")]
+
+
+def normaliser_position_prepa(pp: dict) -> dict:
+    """phase ∈ BASE | BUILD | PIC | AFFUTAGE | LIBRE ; sinon correspondance par mot-clé (ou LIBRE)
+    et texte d'origine déplacé dans « detail »."""
+    brut = str(pp.get("phase") or "").strip()
+    if brut.upper() in PHASES_PREPA:
+        return {**pp, "phase": brut.upper()}
+    code = next((c for mot, c in _MOTS_PHASE if mot in brut.lower()), "LIBRE")
+    detail = " — ".join(x for x in (brut, pp.get("detail")) if x) or None
+    return {**pp, "phase": code, "detail": detail}
 
 
 def valider_semaine(analyse_id: int, seances: Optional[list[dict]] = None) -> dict:
@@ -1432,7 +1493,7 @@ def reconstruire(evenement_id: Optional[int] = None) -> dict:
     reponse, erreur, trace = _appel_llm("reconstruction_evenements", lambda llm: llm.reconstruction_evenements(
         evenements=evenements, historique=resume_semaines(8, lundi_de(d) + timedelta(weeks=1)),
         plan_actuel={"phases": plan_actuel} if plan_actuel else None, profil=_profil_llm(p),
-        statut_sante=p.get("statut_sante", "100%"), mode=p.get("mode_actif", "BASE")))
+        statut_sante=texte_sante_llm(sante_profil(p)), mode=p.get("mode_actif", "BASE")))
     lien = evenement_id if evenement_id and db.evenement(evenement_id) else None
     analyse_id = _tracer("reconstruction_evenements", reponse, erreur, trace, evenement_id=lien)
 

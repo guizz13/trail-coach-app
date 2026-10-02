@@ -5,7 +5,8 @@ coque();
 
 const form = $("#form");
 const CRENEAUX_SQUASH = { soir: "soir", midi: "midi", journee: "journée" };
-let bilan = null, seances = [], sante = "100%";
+let bilan = null, seances = [], sante = "100";
+const zonesChoisies = new Set();
 
 // ---- Formulaire des impératifs ------------------------------------------------
 $("#squash").innerHTML = JOURS.map((j, i) => `<div class="ligne entre" style="${i ? "margin-top:8px" : ""}">
@@ -33,21 +34,29 @@ $("#ajout-contrainte").onclick = () => ajouterContrainte();
 function choisirSante(v) {
   sante = v;
   $$("#sante button").forEach(b => b.classList.toggle("actif", b.dataset.v === v));
-  $("#zone-sante").classList.toggle("hidden", v === "100%");
+  $("#zone-sante").classList.toggle("hidden", v === "100");     // zones : seulement en vigilance ou blessure
 }
 $$("#sante button").forEach(b => { b.onclick = () => choisirSante(b.dataset.v); });
 
+function rendreZones() {
+  $("#zones-sante").innerHTML = ZONES_SANTE.map(z => `<button type="button" data-z="${esc(z)}" class="${zonesChoisies.has(z) ? "actif" : ""}">${esc(z)}</button>`).join("");
+  $$("#zones-sante button").forEach(b => {
+    b.onclick = () => { zonesChoisies.has(b.dataset.z) ? zonesChoisies.delete(b.dataset.z) : zonesChoisies.add(b.dataset.z); rendreZones(); };
+  });
+}
+rendreZones();
+
 function lireImperatifs() {
   const fd = new FormData(form);
-  const zone = (fd.get("zone") || "").trim();
-  if (sante !== "100%" && !zone) throw new Error("Préciser la zone concernée.");
+  if (sante !== "100" && !zonesChoisies.size) throw new Error("Choisir au moins une zone concernée.");
   return {
     semaine_debut: fd.get("semaine_debut"),
     squash: JOURS.filter(j => fd.get("sq-" + j)).map(j => ({ jour: j, creneau: fd.get("sqc-" + j) })),
     contraintes: $$(".contrainte").map(c => ({ jour: $("[name=jour]", c).value, creneau: $("[name=creneau]", c).value,
       raison: $("[name=raison]", c).value.trim() })).filter(c => c.raison),
     ressenti: Number(fd.get("ressenti")), sommeil: Number(fd.get("sommeil")),
-    statut_sante: sante === "100%" ? "100%" : `${sante}:${zone}`,
+    sante: { niveau: sante, zones: sante === "100" ? [] : [...zonesChoisies],
+             note: fd.get("sante_note"), protocole: fd.get("sante_protocole") },
     notes: fd.get("notes"),
   };
 }
@@ -55,9 +64,12 @@ function lireImperatifs() {
 async function init() {
   const d = await api("GET", "/api/dimanche");
   form.semaine_debut.value = d.semaine_debut;
-  const [niveau, zone] = (d.profil.statut_sante || "100%").split(":");
-  choisirSante(niveau);
-  form.zone.value = zone || "";
+  const p = d.profil;
+  (p.sante_zones || []).forEach(z => zonesChoisies.add(z));
+  rendreZones();
+  choisirSante(p.sante_niveau || "100");
+  form.sante_note.value = p.sante_note || "";
+  form.sante_protocole.value = p.sante_protocole || "";
   const imp = d.imperatifs;
   if (!imp) return;
   (imp.squash_jours || []).forEach(x => { form["sq-" + x.jour].checked = true; form["sqc-" + x.jour].value = x.creneau; });
@@ -107,7 +119,8 @@ function afficher() {
       ${liste("Séances manquées", b.seances_manquees)}${liste("Points positifs", b.points_positifs)}${liste("Points de vigilance", b.points_de_vigilance)}
     </div>
     ${pp ? `<div class="carte"><div class="metrique"><span class="label">Position dans la prépa</span></div>
-      <div class="ligne" style="margin-top:6px"><span class="badge orange">${esc(PHASES[pp.phase] || pp.phase)} ${esc(pp.semaine || "")}</span></div>
+      <div class="pill-row" style="margin-top:6px"><span class="badge orange">${esc(pp.phase)}</span>${pp.semaine ? `<span class="badge">sem. ${esc(pp.semaine)}</span>` : ""}</div>
+      ${pp.detail ? `<div class="detail-phase">${esc(pp.detail)}</div>` : ""}
       <p class="seance-detail" style="-webkit-line-clamp:unset;margin:8px 0 0">${esc(pp.avance_retard || "")}</p>
       <p style="margin:6px 0 0;color:#C8C8CC">${esc(pp.decision || "")}</p></div>` : ""}
     ${messageCoach(r.message_coach)}

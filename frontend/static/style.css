@@ -134,9 +134,12 @@ h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; margin: 6px 0 14
 .metrique .valeur { font-size: 20px; font-weight: 700; letter-spacing: -0.5px; margin: 4px 0 2px; font-variant-numeric: tabular-nums; }
 
 /* ---- Badges ------------------------------------------------------------------ */
-.badges { display: flex; flex-wrap: wrap; gap: 6px; }
-.badge {
-  display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 700; text-transform: uppercase;
+.badges, .pill-row { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+/* Pastilles : jamais plus larges que leur conteneur, texte coupé en « … » */
+.badge, .pill {
+  display: inline-block; vertical-align: middle; max-width: 100%; min-width: 0; flex-shrink: 1;
+  overflow: hidden; text-overflow: ellipsis;
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
   letter-spacing: .6px; padding: 5px 10px; border-radius: var(--radius-sm); white-space: nowrap;
   background: var(--bg-surface); color: var(--text-secondary);
 }
@@ -480,3 +483,11 @@ dialog.feuille::backdrop { background: rgba(0, 0, 0, .6); }
   padding: 10px 12px; border-radius: var(--radius-sm); background: var(--bg-surface); font-size: 12px; }
 .liaison .btn.petit { flex-shrink: 0; }
 .liaison-choix { margin-top: 6px; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips button { border: 0.5px solid var(--border); background: var(--bg-surface); color: var(--text-secondary); border-radius: 999px;
+  padding: 7px 11px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.chips button.actif { background: var(--accent-dim); color: var(--accent-light); border-color: var(--accent); }
+.detail-phase { font-size: 12px; color: var(--text-secondary); margin-top: 6px; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+button.badge { font-family: inherit; }

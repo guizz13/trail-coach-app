@@ -249,6 +249,7 @@ Contexte reçu : toutes les séances de la semaine écoulée, le plan prévu, le
   },
   "position_prepa": {
     "phase": "BUILD",
+    "detail": "reprise post-Achille, semaine 2/4",
     "semaine": "5/12",
     "avance_retard": "légèrement en retard sur le D+ cumulé (-8 %)",
     "decision": "Pas de rattrapage. On maintient la progression prévue, la sortie longue de samedi absorbe l'écart."
@@ -293,6 +294,7 @@ Contexte reçu : toutes les séances de la semaine écoulée, le plan prévu, le
 Le champ "resume" du bilan fait 3 phrases maximum (50 mots max).
 Le champ "message_coach" fait 1 à 2 phrases maximum (30 mots max). Direct et actionnable.
 Le champ "objectif" de la semaine suivante fait 1 phrase (15 mots max).
+Le champ "position_prepa.phase" vaut strictement BASE, BUILD, PIC, AFFUTAGE ou LIBRE. Toute précision va dans "position_prepa.detail" (12 mots max), jamais dans "phase".
 
 ### 10.3 — `reconstruction_evenements`
 
@@ -346,6 +348,7 @@ Contexte reçu : la liste complète des événements (existants + nouveau), le m
 
 Le champ "analyse_conflits" fait 1 à 2 phrases maximum.
 Le champ "objectif" de chaque phase du plan_macro fait 1 phrase maximum (20 mots).
+Le champ "phase" de chaque élément du plan_macro vaut strictement BASE, BUILD, PIC ou AFFUTAGE (LIBRE hors préparation), sans autre texte.
 Le champ "message_coach" fait 2 phrases maximum (40 mots max).
 
 Le champ `objectif` de chaque phase du `plan_macro` commence par les repères chiffrés hebdomadaires de la phase, au format exact « Volume X-Y km/sem · D+ X-Y m/sem · Squash N/sem. », puis la phrase d'objectif. L'application lit ces repères pour afficher le plan : ne change ni l'ordre, ni les libellés, ni les unités. Ces repères ne comptent pas dans la limite de longueur de l'objectif.
