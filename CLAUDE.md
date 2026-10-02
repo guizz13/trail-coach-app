@@ -3,6 +3,10 @@
 Application personnelle de coaching pour un athlète hybride (trail, squash, musculation).
 Un seul utilisateur. Priorité à la fiabilité de la logique de coaching, pas à l'esthétique.
 
+## Déploiement
+
+`main` déploie automatiquement en production sur Railway. Ne jamais pousser ni merger sur `main` sans accord explicite de Guillaume.
+
 ## Ce qui existe déjà et ne doit PAS être réécrit
 
 | Fichier | Rôle | Statut |
