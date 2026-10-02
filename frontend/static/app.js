@@ -171,7 +171,7 @@ function reflexion(el, texte = "Sensei réfléchit…") {
   el.innerHTML = `<div class="reflexion"><span class="spinner"></span>${esc(texte)}</div>`;
 }
 
-// Chargeur des appels au coach (5 à 15 s) : kanji 先 qui pulse + message qui tourne toutes les 3 s
+// Chargeur des appels au coach (5 à 15 s) : le S de la marque se trace + message qui tourne toutes les 3 s
 const loadingMessages = [
   "Sensei analyse ton historique...",
   "Construction des phases...",
@@ -192,8 +192,13 @@ const MESSAGES_BILAN = [
 ];
 function chargeurIA(el, messages = loadingMessages) {
   el.innerHTML = `<div class="carte chargeur-ia" aria-busy="true">
-      <div class="chargeur-kanji" aria-hidden="true">先</div>
-      <p class="chargeur-texte" role="status">${esc(messages[0])}</p></div>`;
+      <div class="loader-s" role="status" aria-label="Chargement">
+        <svg viewBox="22.5 21.5 57 57" aria-hidden="true">
+          <path pathLength="100" d="${TRACE_S}" fill="none" stroke="currentColor" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="74" cy="26" r="5.5" fill="currentColor"/>
+        </svg>
+      </div>
+      <p class="chargeur-texte" aria-live="polite">${esc(messages[0])}</p></div>`;
   const texte = $(".chargeur-texte", el);
   let i = 0;
   const minuteur = setInterval(() => {
