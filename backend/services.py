@@ -305,13 +305,68 @@ def prevu_de(seance_id: int) -> Optional[dict]:
     return db.fetch_one("SELECT * FROM seances_planifiees WHERE seance_realisee_id = ?", (seance_id,))
 
 
-def evaluer(seance: dict) -> tuple[str, list]:
-    """Verdict calculé (sans LLM) d'une séance réalisée, d'après son prévu lié."""
+TYPES_COURSE_CONNUS = {"EF", "intervals", "cotes", "tempo", "sortie_longue"}
+
+
+def type_plan_normalise(type_: Optional[str]) -> Optional[str]:
+    """« Sortie longue », « Fractionné »… ramenés au code de séance utilisé par les seuils."""
+    if type_ in TYPES_COURSE_CONNUS:
+        return type_
+    return type_depuis_texte(type_ or "") or type_
+
+
+def sante_profil(p: Optional[dict] = None) -> dict:
+    """Statut santé structuré {niveau, zones, note, protocole} ; lit l'ancien format texte
+    (« vigilance:achille gauche ») tant que les colonnes structurées n'existent pas."""
+    p = p if p is not None else db.profil()
+    if "sante_niveau" in p:
+        zones = p.get("sante_zones") or []
+        return {"niveau": p.get("sante_niveau") or "100", "zones": zones if isinstance(zones, list) else [],
+                "note": p.get("sante_note"), "protocole": p.get("sante_protocole")}
+    brut = (p.get("statut_sante") or "100%").strip()
+    niveau, _, note = brut.partition(":")
+    niveau = niveau if niveau in ("vigilance", "blessure") else "100"
+    return {"niveau": niveau, "zones": [], "note": note.strip() or None, "protocole": None}
+
+
+# Mots qui, dans l'analyse du LLM, justifient une alerte de sécurité… ou la disqualifient
+_MOTS_SECURITE = ("douleur", "blessure", "récupération", "recovery")
+_MOTS_ACWR = ("acwr", "ratio", "charge chronique", "charge aiguë", "charge aigue")
+ORDRE_GRAVITE = {"vert": 0, "orange": 1, "rouge": 2}
+
+
+def verdict_final(code: str, reponse: Optional[dict]) -> str:
+    """Le verdict affiché est celui du backend. Du LLM, on garde le plus bas des deux, sauf s'il cite
+    un signal de sécurité (il peut alors porter un rouge). Un verdict justifié par l'ACWR est ignoré."""
+    v = (reponse or {}).get("verdict")
+    if v not in ORDRE_GRAVITE:
+        return code
+    texte = " ".join([str(reponse.get("analyse") or "")] + [str(x) for x in reponse.get("signaux") or []]).lower()
+    if any(m in texte for m in _MOTS_ACWR):
+        return code
+    if v == "rouge" and any(m in texte for m in _MOTS_SECURITE):
+        return "rouge"
+    if code == "hors_plan" or code == "rouge":
+        return code          # hors plan reste neutre ; un rouge de sécurité calculé n'est jamais adouci
+    return min(code, v, key=ORDRE_GRAVITE.get)
+
+
+def _derniere_reponse_llm(seance_id: int) -> Optional[dict]:
+    for a in db.analyses_seance(seance_id):
+        if a["type_appel"] == "analyse_seance" and isinstance(a["reponse_json"], dict) and "verdict" in a["reponse_json"]:
+            return {k: v for k, v in a["reponse_json"].items() if k != "recalcul"}
+    return None
+
+
+def evaluer(seance: dict, reponse_llm: Optional[dict] = None) -> tuple[str, list]:
+    """Verdict d'une séance réalisée d'après son prévu lié, le statut santé et la récupération
+    (jamais l'ACWR), combiné à la dernière analyse du LLM s'il y en a une."""
     prevu = prevu_de(seance["id"])
-    prevu_eval = {"type": prevu["type"], "distance_km": prevu["distance_km"],
+    prevu_eval = {"type": type_plan_normalise(prevu["type"]), "distance_km": prevu["distance_km"],
                   "duree_min": prevu["duree_min"]} if prevu else None
-    return metrics.evaluer_seance(seance, prevu_eval, acwr_au(date_de(seance["date_debut"])),
-                                  _prochaine_qualite_dans_h(seance))
+    code, signaux = metrics.evaluer_seance(seance, prevu_eval, sante_profil(), _prochaine_qualite_dans_h(seance))
+    reponse = reponse_llm if reponse_llm is not None else _derniere_reponse_llm(seance["id"])
+    return verdict_final(code, reponse), signaux
 
 
 def evaluer_et_stocker(seance: dict, horodatage: Optional[str] = None) -> tuple[str, Optional[str]]:
@@ -428,7 +483,8 @@ def acwr_dict(a: metrics.ACWR) -> dict:
 # ---------------------------------------------------------------------------
 def importer_et_analyser(fichier_bytes: bytes, nom: str, muscu_detail: Optional[dict] = None,
                          famille: Optional[str] = None, sous_type: Optional[str] = None,
-                         analyser: bool = True) -> dict:
+                         analyser: bool = True, douleur: Optional[int] = None,
+                         douleur_zone: Optional[str] = None) -> dict:
     # 1. Hash, anti-doublon
     h = hash_fichier(fichier_bytes)
     existant = db.seance_par_hash(h)
@@ -444,6 +500,11 @@ def importer_et_analyser(fichier_bytes: bytes, nom: str, muscu_detail: Optional[
         db.enregistrer_activity_type(s.activity_type_code, s.famille)
 
     ligne = _ligne_seance(s, h, nom, confirme)
+    if douleur not in (None, ""):
+        d_val = int(douleur)
+        if not 0 <= d_val <= 10:
+            raise ErreurImport("Douleur : valeur entre 0 et 10.")
+        ligne.update(douleur=d_val, douleur_zone=(douleur_zone or None))
     try:
         with db.connexion() as c:
             seance_id = db.inserer("seances_realisees", ligne, conn=c)
@@ -465,7 +526,6 @@ def importer_et_analyser(fichier_bytes: bytes, nom: str, muscu_detail: Optional[
     prochaine_h = _prochaine_qualite_dans_h(seance)
     verdict, signaux = evaluer(seance)
     indicateurs = {
-        "acwr": acwr_dict(acwr),
         "signaux": [asdict(x) for x in signaux],
         "distribution_semaine": distribution_semaine(lundi_de(d)),
         "prochaine_qualite_dans_h": prochaine_h,
@@ -483,10 +543,10 @@ def importer_et_analyser(fichier_bytes: bytes, nom: str, muscu_detail: Optional[
         reponse, erreur, trace = _appel_llm(
             "analyse_seance", lambda llm: llm.analyse_seance(
                 seance=seance_llm, prevu=prevu and _planifiee_llm(prevu), semaine=reste,
-                indicateurs={**indicateurs, "verdict_calcule": verdict},
+                indicateurs={**indicateurs, "verdict_calcule": verdict},   # pas d'ACWR : il ne juge pas une séance
                 profil=_profil_llm(p), statut_sante=p.get("statut_sante", "100%"), mode=p.get("mode_actif", "BASE")))
         if reponse is not None:
-            verdict = _plus_severe(verdict, reponse.get("verdict"))
+            verdict = verdict_final(verdict, reponse)
         analyse_id = _tracer("analyse_seance", reponse, erreur, trace, verdict=verdict, seance_id=seance_id)
     db.maj("seances_realisees", seance_id, {"verdict": verdict})
 
@@ -509,7 +569,7 @@ def importer_et_analyser(fichier_bytes: bytes, nom: str, muscu_detail: Optional[
         "seance": _seance_publique(seance),
         "prevu": prevu,
         "verdict": verdict,
-        "indicateurs": indicateurs,
+        "indicateurs": {**indicateurs, "acwr": acwr_dict(acwr)},   # affichage seulement
         "analyse_id": analyse_id,
         "analyse_llm": reponse,
         "erreur_llm": erreur,
@@ -767,7 +827,6 @@ def valider_planifiee(p: dict) -> dict:
 # LLM : client, appel tracé, formats de contexte
 # ---------------------------------------------------------------------------
 _llm = None
-ORDRE_VERDICT = {"vert": 0, "orange": 1, "rouge": 2}
 
 
 def client_llm():
@@ -822,10 +881,6 @@ def _tracer(type_appel: str, reponse: Optional[dict], erreur: Optional[dict], tr
         "cree_le": maintenant().isoformat(timespec="seconds"),
         **{k: v for k, v in liens.items() if v is not None},
     })
-
-
-def _plus_severe(a: str, b: Optional[str]) -> str:
-    return b if b in ORDRE_VERDICT and ORDRE_VERDICT[b] > ORDRE_VERDICT.get(a, 0) else a
 
 
 def _seance_llm(s: dict) -> dict:

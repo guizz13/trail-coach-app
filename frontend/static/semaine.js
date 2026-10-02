@@ -18,7 +18,8 @@ async function charger(lundi) {
       courante ? tableau.semaine : api("GET", `/api/semaine?lundi=${lundiAffiche}`),
       api("GET", `/api/seances?du=${lundiAffiche}&au=${dimanche}`),
     ]);
-    const verdicts = await verdictsDe(realisees);
+    // Verdict stocké sur chaque séance réalisée (recalculé à chaque changement)
+    const verdicts = Object.fromEntries(realisees.map(s => [s.id, s.verdict]));
     rendreEntete(dimanche);
     rendreObjectifProche();
     rendreCoach(dimanche);
@@ -26,14 +27,6 @@ async function charger(lundi) {
     rendreVolume(courante, realisees);
     rendrePlanning(jours, realisees, verdicts);
   } catch (e) { erreurSimple($("#planning"), e); }
-}
-
-// Verdict de la dernière analyse de chaque séance réalisée
-async function verdictsDe(realisees) {
-  const details = await Promise.all(realisees.map(s => api("GET", `/api/seances/${s.id}`).catch(() => null)));
-  const v = {};
-  details.forEach(d => { if (d && d.analyses.length) v[d.seance.id] = d.analyses[0].verdict; });
-  return v;
 }
 
 function rendreEntete(dimanche) {

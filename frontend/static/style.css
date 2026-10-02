@@ -152,6 +152,7 @@ button.badge { border: 0; cursor: pointer; transition: background .2s ease; }
 .verdict { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; }
 .verdict::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .verdict.vert { color: var(--green); } .verdict.orange { color: var(--orange); } .verdict.rouge { color: var(--red); }
+.verdict.hors_plan { color: var(--text-muted); }
 
 /* ---- Carte de séance --------------------------------------------------------- */
 .jour { background: var(--bg-card); border-radius: var(--radius); padding: 12px 14px; border: 0.5px solid var(--border); }
@@ -308,6 +309,7 @@ input[type=file] { padding: 6px; font-size: 16px; }
 .verdict-carte .tete.vert { background: var(--green-dim); color: var(--green); }
 .verdict-carte .tete.orange { background: var(--orange-dim); color: var(--orange); }
 .verdict-carte .tete.rouge { background: var(--red-dim); color: var(--red); }
+.verdict-carte .tete.hors_plan { background: var(--bg-surface); color: var(--text-secondary); }
 .verdict-carte .corps { padding: 12px 14px; }
 .verdict-carte .corps p { margin: 0 0 8px; line-height: 1.5; color: #C8C8CC; }
 .ajustement { border-top: 0.5px solid var(--border); padding: 8px 0; font-size: 12px; }

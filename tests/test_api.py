@@ -211,3 +211,15 @@ def test_acwr_non_expose_pendant_le_calibrage(client):
     assert "charge_aigue" not in a and a["jours_calibrage"] == 21
     g = client.get("/api/graphiques").json()
     assert all(p["ratio"] is None for p in g["acwr_quotidien"])
+
+
+def test_import_avec_douleur(client):
+    import json as _json
+    r = client.post("/api/import", files={"fichier": ("t.json", lire("course_tapis"))},
+                    data={"options": _json.dumps({"analyser": False, "douleur": 5, "douleur_zone": "Achille D"})})
+    assert r.status_code == 200, r.text
+    assert r.json()["verdict"] == "rouge"
+    assert r.json()["seance"]["douleur"] == 5 and r.json()["seance"]["douleur_zone"] == "Achille D"
+    r = client.post("/api/import", files={"fichier": ("v.json", lire("velo"))},
+                    data={"options": _json.dumps({"analyser": False, "douleur": 12})})
+    assert r.status_code == 422

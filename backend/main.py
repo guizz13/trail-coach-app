@@ -277,6 +277,8 @@ def api_import(fichier: UploadFile = File(...), options: str = Form("{}")):
         famille=opts.get("famille") or None,
         sous_type=opts.get("sous_type") or None,
         analyser=opts.get("analyser", True) is not False,
+        douleur=opts.get("douleur"),
+        douleur_zone=opts.get("douleur_zone"),
     )
 
 

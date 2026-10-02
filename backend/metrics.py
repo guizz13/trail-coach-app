@@ -188,17 +188,19 @@ def distribution_hebdo(seances_course: Iterable[dict]) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Évaluation des seuils d'alerte sur UNE séance vs son prévu
+# Évaluation d'UNE séance vs son prévu — découplée de l'ACWR (indicateur de tendance hebdomadaire)
 # ---------------------------------------------------------------------------
 SEUILS = {
-    "epoc_ef":        {"orange": 100, "rouge": 130},
-    "z3_sur_ef":      {"orange": 40,  "rouge": 60},
-    "z45_sur_longue": {"orange": 30,  "rouge": 45},
-    "ecart_volume":   {"orange": 25,  "rouge": 40},   # en %
-    "acwr":           {"orange": 1.4, "rouge": 1.5},
-    "recovery_h":     {"rouge": 48},
+    "ef_z3_et_plus": 25,        # % du temps ≥ Z3 sur une EF prévue (orange)
+    "longue_z45": 30,           # % du temps en Z4-Z5 sur une sortie longue prévue (orange)
+    "intervals_z45_min": 8,     # % minimal en Z4-Z5 sur des intervalles prévus (orange : qualité ratée)
+    "ecart_pct": 25,            # écart de durée ou de distance vs prévu (orange)
+    "recovery_h": 48,           # RecoveryTime chevauchant une séance qualité (rouge)
+    "douleur": 4,               # douleur déclarée /10 (rouge)
 }
 FAMILLES_COURSE = {"course_outdoor", "course_tapis"}
+ZONES_BAS_DU_CORPS = {"Achille G", "Achille D", "Fascia G", "Fascia D", "Mollet G", "Mollet D",
+                      "Genou G", "Genou D", "Hanche"}
 
 
 @dataclass
@@ -210,75 +212,65 @@ class Signal:
     detail: str
 
 
-def evaluer_seance(realise: dict, prevu: Optional[dict], acwr: Optional[ACWR],
+def evaluer_seance(realise: dict, prevu: Optional[dict], sante: Optional[dict] = None,
                    prochaine_qualite_dans_h: Optional[float] = None) -> tuple[str, list[Signal]]:
     """
-    realise : séance extraite (dict de SeanceExtraite)
-    prevu   : {'type': 'EF'|'intervals'|..., 'distance_km': x, 'duree_min': y} ou None
-    acwr    : résultat de calculer_acwr après intégration de cette séance
+    realise : séance réalisée (ligne seances_realisees ; douleur et douleur_zone facultatives)
+    prevu   : {'type': 'EF'|'intervals'|'sortie_longue'|..., 'distance_km': x, 'duree_min': y} ou None
+    sante   : {'niveau': '100'|'vigilance'|'blessure', 'zones': [...]}
     prochaine_qualite_dans_h : heures avant la prochaine séance qualité planifiée
 
-    Retourne (verdict, signaux).
+    Verdicts : vert (conforme), orange (écart), rouge (alerte, sécurité uniquement),
+    hors_plan (aucun prévu lié : pas de seuil, seuls les signaux de sécurité s'appliquent).
+    Les oranges ne deviennent jamais rouges, même cumulés.
     """
     signaux: list[Signal] = []
+    sante = sante or {}
     pct = realise.get("temps_zones_pct") or {}
-    z3 = pct.get("z3", 0)
+    z3_plus = pct.get("z3", 0) + pct.get("z4", 0) + pct.get("z5", 0)
     z45 = pct.get("z4", 0) + pct.get("z5", 0)
-    epoc = realise.get("epoc") or 0
     type_prevu = (prevu or {}).get("type")
-    # Seuils de zones, d'EPOC et de volume : course uniquement. Le squash vit en Z4-Z5 par nature ;
-    # pour squash, vélo et muscu, seuls l'ACWR et la récupération s'appliquent.
-    course = realise.get("famille") in FAMILLES_COURSE
+    course = realise.get("famille") in FAMILLES_COURSE      # zones : course uniquement, jamais squash/muscu/vélo
 
-    # EF : dérive Z3 et EPOC
-    if course and type_prevu == "EF":
-        _check(signaux, "epoc_sur_ef", epoc, SEUILS["epoc_ef"],
-               f"EPOC {epoc:.0f} sur une séance prévue en endurance fondamentale")
-        _check(signaux, "z3_sur_ef", z3, SEUILS["z3_sur_ef"],
-               f"{z3:.0f} % du temps en Z3 sur une EF")
+    # ---- Orange : écarts au prévu ----
+    if prevu and course and pct:
+        if type_prevu == "EF" and z3_plus > SEUILS["ef_z3_et_plus"]:
+            signaux.append(Signal("ef_intensite", "orange", round(z3_plus, 1), SEUILS["ef_z3_et_plus"],
+                                  f"{z3_plus:.0f} % du temps en Z3 ou au-dessus sur une EF"))
+        if type_prevu == "sortie_longue" and z45 > SEUILS["longue_z45"]:
+            signaux.append(Signal("longue_intensite", "orange", round(z45, 1), SEUILS["longue_z45"],
+                                  f"{z45:.0f} % du temps en Z4-Z5 sur une sortie longue"))
+        if type_prevu == "intervals" and z45 < SEUILS["intervals_z45_min"]:
+            signaux.append(Signal("intervals_non_atteints", "orange", round(z45, 1), SEUILS["intervals_z45_min"],
+                                  f"seulement {z45:.0f} % en Z4-Z5 : séance qualité non atteinte"))
+    if prevu:
+        for cle, unite, nom in (("duree_min", "min", "ecart_duree"), ("distance_km", "km", "ecart_distance")):
+            p, r = prevu.get(cle), realise.get(cle)
+            if p and r:
+                ecart = abs(r - p) / p * 100
+                if ecart > SEUILS["ecart_pct"]:
+                    signaux.append(Signal(nom, "orange", round(ecart), SEUILS["ecart_pct"],
+                                          f"écart de {ecart:.0f} % : {r:g} {unite} réalisés pour {p:g} prévus"))
 
-    # Sortie longue : intensité
-    if course and type_prevu == "sortie_longue":
-        _check(signaux, "z45_sur_longue", z45, SEUILS["z45_sur_longue"],
-               f"{z45:.0f} % du temps en Z4-Z5 sur une sortie longue")
-
-    # Écart de volume
-    if course and prevu and prevu.get("distance_km") and realise.get("distance_km"):
-        ecart = abs(realise["distance_km"] - prevu["distance_km"]) / prevu["distance_km"] * 100
-        _check(signaux, "ecart_volume", ecart, SEUILS["ecart_volume"],
-               f"écart de {ecart:.0f} % entre {realise['distance_km']} km réalisés et {prevu['distance_km']} km prévus")
-
-    # ACWR : pas d'alerte tant que l'historique de charge est trop court pour être fiable
-    if acwr and acwr.zone == "calibrage":
-        signaux.append(Signal("acwr", "info", acwr.jours_historique, JOURS_CALIBRAGE,
-                              "Historique de charge trop court pour évaluer"))
-    elif acwr and acwr.ratio is not None:
-        _check(signaux, "acwr", acwr.ratio, SEUILS["acwr"],
-               f"ACWR à {acwr.ratio} (charge aiguë {acwr.charge_aigue:.0f} / chronique {acwr.charge_chronique:.0f})")
-
-    # RecoveryTime vs prochaine qualité
+    # ---- Rouge : sécurité uniquement ----
+    zones_sante = set(sante.get("zones") or [])
+    niveau = sante.get("niveau") or "100"
+    douleur, zone_douleur = realise.get("douleur"), realise.get("douleur_zone")
+    if douleur is not None and douleur >= SEUILS["douleur"]:
+        signaux.append(Signal("douleur", "rouge", douleur, SEUILS["douleur"], f"douleur déclarée {douleur}/10"))
+    elif douleur and niveau in ("vigilance", "blessure") and zone_douleur in zones_sante:
+        signaux.append(Signal("douleur_zone", "rouge", douleur, 0,
+                              f"douleur {douleur}/10 sur une zone en {niveau} ({zone_douleur})"))
+    if course and niveau == "blessure" and zones_sante & ZONES_BAS_DU_CORPS:
+        signaux.append(Signal("course_en_blessure", "rouge", 1, 0,
+                              "course réalisée en statut Blessure sur le bas du corps (" + ", ".join(sorted(zones_sante & ZONES_BAS_DU_CORPS)) + ")"))
     rec_h = realise.get("recovery_time_h") or 0
-    if rec_h > SEUILS["recovery_h"]["rouge"]:
-        signaux.append(Signal("recovery", "rouge", rec_h, 48,
-                              f"récupération estimée {rec_h:.0f} h"))
-    elif prochaine_qualite_dans_h is not None and rec_h > prochaine_qualite_dans_h:
-        signaux.append(Signal("recovery", "orange", rec_h, prochaine_qualite_dans_h,
-                              f"récupération {rec_h:.0f} h chevauche la prochaine séance qualité dans {prochaine_qualite_dans_h:.0f} h"))
+    if rec_h > SEUILS["recovery_h"] and prochaine_qualite_dans_h is not None and prochaine_qualite_dans_h < rec_h:
+        signaux.append(Signal("recovery", "rouge", rec_h, SEUILS["recovery_h"],
+                              f"récupération {rec_h:.0f} h chevauchant la séance qualité dans {prochaine_qualite_dans_h:.0f} h"))
 
-    # Verdict global : rouge si un rouge ou deux oranges
-    nb_rouge = sum(1 for s in signaux if s.niveau == "rouge")
-    nb_orange = sum(1 for s in signaux if s.niveau == "orange")
-    if nb_rouge or nb_orange >= 2:
-        verdict = "rouge"
-    elif nb_orange:
-        verdict = "orange"
-    else:
-        verdict = "vert"
-    return verdict, signaux
-
-
-def _check(signaux: list, nom: str, valeur: float, seuils: dict, detail: str) -> None:
-    if "rouge" in seuils and valeur > seuils["rouge"]:
-        signaux.append(Signal(nom, "rouge", valeur, seuils["rouge"], detail))
-    elif "orange" in seuils and valeur > seuils["orange"]:
-        signaux.append(Signal(nom, "orange", valeur, seuils["orange"], detail))
+    if any(x.niveau == "rouge" for x in signaux):
+        return "rouge", signaux
+    if not prevu:
+        return "hors_plan", signaux
+    return ("orange" if any(x.niveau == "orange" for x in signaux) else "vert"), signaux

@@ -86,6 +86,13 @@ function carte(a, fichier, brut) {
       ${estCourse && a.demander_sous_type ? `<div class="bandeau orange">Type détecté : <b>${esc(libelleType(s.sous_type))}</b> — corriger ?</div>
         <select name="sous_type" style="margin-top:8px">${a.sous_types.map(t => `<option value="${t}" ${t === s.sous_type ? "selected" : ""}>${esc(libelleType(t))}</option>`).join("")}</select>` : ""}
       ${s.famille === "muscu" ? formulaireMuscu(a) : ""}
+      <details><summary><i class="ti ti-plus"></i> Signaler une douleur</summary>
+        <div class="champs-2" style="margin-top:8px">
+          <div><label>Douleur (0-10)</label><input type="number" name="douleur" min="0" max="10" inputmode="numeric"></div>
+          <div><label>Zone</label><select name="douleur_zone"><option value="">—</option>${ZONES_SANTE.map(z => `<option>${esc(z)}</option>`).join("")}</select></div>
+        </div>
+        <div class="sous-texte">À partir de 4/10, ou sur une zone en vigilance, la séance passe en alerte.</div>
+      </details>
       <button type="submit" class="btn principal" style="margin-top:14px"></button>
     </form>
     <div class="resultat"></div>`;
@@ -104,6 +111,7 @@ function carte(a, fichier, brut) {
     const opts = { analyser: $("#avec-llm").checked };
     if (fd.get("famille")) opts.famille = fd.get("famille");
     if (fd.get("sous_type")) opts.sous_type = fd.get("sous_type");
+    if (fd.get("douleur") !== null && fd.get("douleur") !== "") { opts.douleur = Number(fd.get("douleur")); opts.douleur_zone = fd.get("douleur_zone") || null; }
     if (s.famille === "muscu") {
       opts.muscu_detail = {
         split: $("[data-split] .actif", el)?.dataset.v || a.split_propose,

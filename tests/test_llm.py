@@ -74,7 +74,7 @@ def test_analyse_ajustements_appliques(monkeypatch):
     inter = planifier("2026-09-25", "intervals", detail="6x3min")
 
     r = services.importer_et_analyser(lire("course_tapis"), "tapis.json")
-    assert r["verdict"] == "orange"
+    assert r["verdict"] == "vert"               # EF conforme : le LLM n'aggrave pas sans signal de sécurité
     assert r["validation_requise"] is False
     assert r["ajustements_appliques"][0]["applique"] is True
 
@@ -85,18 +85,19 @@ def test_analyse_ajustements_appliques(monkeypatch):
     # Contexte transmis au LLM
     _, ctx = faux.appels[0]
     assert ctx["prevu"]["type"] == "EF"
-    assert "acwr" in ctx["indicateurs"] and "distribution_semaine" in ctx["indicateurs"]
+    assert "acwr" not in ctx["indicateurs"] and "distribution_semaine" in ctx["indicateurs"]
     assert "donnees_brutes" not in ctx["seance"]
     assert ctx["mode"] == "BASE" and ctx["statut_sante"] == "100%"
 
     # Trace en base avec tokens et coût
     a = db.analyse(r["analyse_id"])
     assert (a["tokens_in"], a["tokens_out"], a["cout_usd"]) == (1000, 200, 0.02)
-    assert a["verdict"] == "orange" and a["valide_par_user"] == 1
+    assert a["verdict"] == "vert" and a["valide_par_user"] == 1
 
 
 def test_analyse_rouge_attend_validation(monkeypatch):
-    rouge = {**ANALYSE_ORANGE, "verdict": "rouge", "validation_requise": True}
+    rouge = {**ANALYSE_ORANGE, "verdict": "rouge", "validation_requise": True,
+             "analyse": "Douleur au tendon d'Achille signalée en fin de séance."}
     brancher(monkeypatch, analyse_seance=rouge)
     inter = planifier("2026-09-25", "intervals")
 
@@ -112,7 +113,7 @@ def test_analyse_rouge_attend_validation(monkeypatch):
 
 
 def test_garder_plan_initial(monkeypatch):
-    brancher(monkeypatch, analyse_seance={**ANALYSE_ORANGE, "verdict": "rouge"})
+    brancher(monkeypatch, analyse_seance={**ANALYSE_ORANGE, "verdict": "rouge", "analyse": "Douleur au mollet droit."})
     inter = planifier("2026-09-25", "intervals")
     r = services.importer_et_analyser(lire("course_tapis"), "tapis.json")
     services.decider_ajustements(r["analyse_id"], accepter=False)
@@ -120,12 +121,31 @@ def test_garder_plan_initial(monkeypatch):
     assert db.analyse(r["analyse_id"])["valide_par_user"] == -1
 
 
-def test_verdict_code_prime_sur_llm_plus_clement(monkeypatch):
-    # Outdoor sur une EF prévue : 65 % Z3 → rouge côté code, même si le LLM dit vert
-    brancher(monkeypatch, analyse_seance={**ANALYSE_ORANGE, "verdict": "vert", "ajustements": []})
+def test_llm_peut_adoucir_mais_pas_aggraver(monkeypatch):
+    # EF prévue, 76 % en Z3+ : orange côté code
     planifier("2026-09-15", "EF")
-    r = services.importer_et_analyser(lire("course_outdoor"), "o.json")
-    assert r["verdict"] == "rouge"
+    brancher(monkeypatch, analyse_seance={**ANALYSE_ORANGE, "verdict": "vert", "ajustements": []})
+    assert services.importer_et_analyser(lire("course_outdoor"), "o.json")["verdict"] == "vert"   # le plus bas
+
+
+def test_llm_rouge_sans_securite_ignore(monkeypatch):
+    planifier("2026-09-15", "EF")
+    brancher(monkeypatch, analyse_seance={**ANALYSE_ORANGE, "verdict": "rouge", "ajustements": [],
+                                          "analyse": "Séance bien trop intense pour une EF."})
+    assert services.importer_et_analyser(lire("course_outdoor"), "o.json")["verdict"] == "orange"
+
+
+def test_llm_rouge_justifie_par_l_acwr_ignore(monkeypatch):
+    brancher(monkeypatch, analyse_seance={**ANALYSE_ORANGE, "verdict": "rouge", "ajustements": [],
+                                          "analyse": "ACWR à 4,2 : risque de blessure, douleur probable."})
+    assert services.importer_et_analyser(lire("squash"), "s.json")["verdict"] == "hors_plan"
+
+
+def test_analyse_seance_sans_acwr(monkeypatch):
+    faux = brancher(monkeypatch, analyse_seance=ANALYSE_ORANGE)
+    services.importer_et_analyser(lire("course_tapis"), "t.json")
+    _, ctx = faux.appels[0]
+    assert "acwr" not in ctx["indicateurs"]
 
 
 def test_ajustement_jour_passe_ignore(monkeypatch):
@@ -283,23 +303,25 @@ def test_recalcul_des_verdicts(monkeypatch):
     faux = brancher(monkeypatch, analyse_seance={**ANALYSE_ORANGE, "verdict": "rouge", "ajustements": [],
                                                  "analyse": "Squash trop intense."})
     squash = services.importer_et_analyser(lire("squash"), "s.json")
-    assert db.analyse(squash["analyse_id"])["verdict"] == "rouge"          # verdict du LLM, plus sévère
+    # Verdict laissé par l'ancienne logique (zones + LLM plus sévère)
+    db.maj("analyses_llm", squash["analyse_id"], {"verdict": "rouge"})
+    db.maj("seances_realisees", squash["seance"]["id"], {"verdict": "rouge"})
     planifier("2026-09-15", "EF")
     course = services.importer_et_analyser(lire("course_outdoor"), "o.json")
     services.importer_et_analyser(lire("velo"), "v.json", analyser=False)
     nb_appels = len(faux.appels)
 
-    r = services.recalculer_verdicts()
+    r = services.recalculer_tout()
     assert len(faux.appels) == nb_appels                                    # aucun appel LLM
     assert (r["seances"], r["analyses_mises_a_jour"], r["seances_sans_analyse"]) == (3, 2, 1)
 
     a = db.analyse(squash["analyse_id"])
-    assert a["verdict"] == "vert"                                           # squash : pas d'alerte de zones
+    assert a["verdict"] == "hors_plan"                                      # squash hors plan, jamais d'alerte de zones
     assert a["reponse_json"]["analyse"] == "Squash trop intense."           # réponse du LLM conservée
-    assert a["reponse_json"]["recalcul"]["verdict"] == "vert"
+    assert a["reponse_json"]["recalcul"]["verdict"] == "hors_plan"
     assert {"seance_id": squash["seance"]["id"], "date": "2026-08-27", "famille": "squash",
-            "avant": "rouge", "apres": "vert"} in r["changements"]
+            "avant": "rouge", "apres": "hors_plan"} in r["changements"]
 
     c = db.analyse(course["analyse_id"])
-    assert c["verdict"] == "rouge"                                          # 65 % en Z3 sur EF prévue
-    assert "z3_sur_ef" in {s["nom"] for s in c["reponse_json"]["recalcul"]["signaux"]}
+    assert c["verdict"] == "orange"                                         # 76 % en Z3+ sur EF prévue
+    assert "ef_intensite" in {s["nom"] for s in c["reponse_json"]["recalcul"]["signaux"]}

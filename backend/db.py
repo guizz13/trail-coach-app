@@ -73,6 +73,8 @@ COLONNES_AJOUTEES = [
     ("seances_realisees", "lien_manuel", "INTEGER NOT NULL DEFAULT 0"),
     ("seances_realisees", "verdict", "TEXT"),            # vert | orange | rouge | hors_plan
     ("seances_realisees", "signaux", "TEXT"),            # JSON : signaux du dernier calcul
+    ("seances_realisees", "douleur", "INTEGER"),         # douleur déclarée /10 (facultative)
+    ("seances_realisees", "douleur_zone", "TEXT"),
 ]
 
 

@@ -36,7 +36,7 @@ def test_import_cinq_fichiers(nom):
     trimp = sum(w * s["temps_zones_s"][z] / 60 for z, w in {"z1": 1, "z2": 2, "z3": 3, "z4": 4, "z5": 5}.items())
     assert s["charge"] == pytest.approx(trimp, abs=0.1)
     assert s["charge"] != s["epoc"]
-    assert r["verdict"] in ("vert", "orange", "rouge")
+    assert r["verdict"] == "hors_plan"          # aucune séance prévue : pas de seuil
     assert r["analyse_llm"] is None
 
     # La ligne en base contient le JSON brut complet
@@ -96,8 +96,8 @@ def test_rattachement_au_prevu_et_verdict():
     r = services.importer_et_analyser(lire("course_outdoor"), "outdoor.json")
     assert r["prevu"]["id"] == pid
     noms = {s["nom"]: s["niveau"] for s in r["indicateurs"]["signaux"]}
-    assert noms.get("z3_sur_ef") == "rouge"
-    assert r["verdict"] == "rouge"
+    assert noms.get("ef_intensite") == "orange"  # 76 % en Z3 ou au-dessus sur une EF
+    assert r["verdict"] == "orange"
 
     p = db.planifiee(pid)
     assert p["statut"] == "realise"

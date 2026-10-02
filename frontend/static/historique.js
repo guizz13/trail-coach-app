@@ -106,16 +106,12 @@ async function chargerMuscu() {
 }
 
 // ---- Liste des séances ------------------------------------------------------------------------
-const verdicts = {};
 async function rendreListe() {
   // L'API renvoie déjà les séances de la plus récente à la plus ancienne
   const liste = seances.filter(s => !famille || disciplineFamille(s.famille) === famille);
   const el = $("#liste");
   if (!liste.length) { el.innerHTML = `<div class="vide" style="padding:10px 0">Aucune séance sur la période.</div>`; return; }
   const visibles = liste.slice(0, affichees);
-  // Verdict de chaque séance affichée (dernière analyse), chargé à la demande
-  await Promise.all(visibles.filter(s => !(s.id in verdicts)).map(s =>
-    api("GET", `/api/seances/${s.id}`).then(d => { verdicts[s.id] = d.analyses[0]?.verdict || null; }).catch(() => { verdicts[s.id] = null; })));
   el.innerHTML = "";
   for (const s of visibles) {
     const b = document.createElement("button");
@@ -124,7 +120,7 @@ async function rendreListe() {
     b.innerHTML = `${iconeDisc(disciplineFamille(s.famille))}
       <div class="seance-corps"><div class="seance-type">${esc(titre)}</div>
         <div class="seance-detail">${esc(dateFR(s.date_debut, { weekday: "short", day: "numeric", month: "short" }))} · ${esc(duree(s.duree_min))}${s.distance_km ? " · " + nb(s.distance_km, 1, "km") : ""}</div></div>
-      <div class="seance-droite">${verdictHTML(verdicts[s.id])}<i class="ti ti-chevron-right muted"></i></div>`;
+      <div class="seance-droite">${verdictHTML(s.verdict)}<i class="ti ti-chevron-right muted"></i></div>`;
     b.onclick = () => ouvrir(s.id);
     el.appendChild(b);
   }
@@ -181,6 +177,10 @@ async function ouvrir(id) {
         <div class="badges">${(m.groupes || []).map(g => `<span class="badge">${esc(GROUPES[g] || g)}</span>`).join("")}</div>
         ${(m.charges || []).length ? `<table style="margin-top:8px"><tr><th>Exercice</th><th class="n">kg</th><th class="n">reps</th><th class="n">séries</th></tr>
           ${m.charges.map(c => `<tr><td>${esc(c.exo)}</td><td class="n">${nb(c.kg, 1)}</td><td class="n">${nb(c.reps)}</td><td class="n">${nb(c.series)}</td></tr>`).join("")}</table>` : ""}` : ""}
+      <div class="section-label">Verdict</div>
+      <div class="ligne wrap">${verdictHTML(s.verdict) || `<span class="vide">non calculé</span>`}
+        ${s.douleur != null ? `<span class="badge ${s.douleur >= 4 ? "rouge" : ""}">douleur ${s.douleur}/10${s.douleur_zone ? " · " + esc(s.douleur_zone) : ""}</span>` : ""}</div>
+      ${(s.signaux || []).filter(x => x.niveau !== "info").map(x => `<div class="seance-detail" style="-webkit-line-clamp:unset;margin-top:4px">· ${esc(x.detail)}</div>`).join("")}
       <div class="section-label">Analyse</div>
       <div id="analyses"></div>`;
     rendreLiaison(d, x);
@@ -209,8 +209,7 @@ $("#recalculer").onclick = async () => {
     const n = r.changements.length;
     zone.textContent = `${r.analyses_mises_a_jour} analyse(s) recalculée(s), ${n} verdict(s) modifié(s)`
       + (r.seances_sans_analyse ? ` · ${r.seances_sans_analyse} séance(s) sans analyse` : "") + ".";
-    Object.keys(verdicts).forEach(k => delete verdicts[k]);   // relecture des verdicts à jour
-    rendreListe();
+    await charger();                                           // relecture des verdicts à jour
   } catch (e) { erreurSimple(zone, e); }
   finally { b.disabled = false; }
 };
@@ -221,7 +220,7 @@ const libellePrevu = p => `${libelleType(p.type)} (${dateFR(p.date_seance, { wee
 function rendreLiaison(d, x) {
   const el = $("#liaison", d), id = x.seance.id;
   const apres = async promesse => {
-    try { const nx = await promesse; rendreLiaison(d, nx); delete verdicts[id]; rendreListe(); }
+    try { const nx = await promesse; rendreLiaison(d, nx); await charger(); }
     catch (e) { erreurSimple($(".liaison-erreur", el) || el, e); }
   };
   if (x.prevu) {

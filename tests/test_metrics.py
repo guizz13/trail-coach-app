@@ -60,43 +60,73 @@ def test_sans_seance():
     assert metrics.calculer_acwr([], REF).zone == "calibrage"
 
 
-def test_signal_info_pendant_le_calibrage():
-    a = metrics.calculer_acwr(quotidiennes(10, 60), REF)
-    verdict, signaux = metrics.evaluer_seance(seance(0, 60), None, a)
-    assert verdict == "vert" and [x.niveau for x in signaux] == ["info"]
-
-
-# ---- Point 5 : seuils par discipline -------------------------------------------------
+# ---- Section 4 (v4) : verdict découplé de l'ACWR ----------------------------------------------
 ZONES_INTENSES = {"z1": 3, "z2": 10, "z3": 20, "z4": 35, "z5": 32}   # typique d'un match de squash
+SANTE_OK = {"niveau": "100", "zones": []}
+
+
+def course(**kw) -> dict:
+    return {"famille": "course_outdoor", "duree_min": 45, "distance_km": 8, "temps_zones_pct": {"z2": 90, "z3": 10}, **kw}
+
+
+def test_conforme_et_hors_plan():
+    assert metrics.evaluer_seance(course(), {"type": "EF", "duree_min": 45, "distance_km": 8}, SANTE_OK)[0] == "vert"
+    verdict, signaux = metrics.evaluer_seance(course(temps_zones_pct={"z3": 60, "z4": 30}), None, SANTE_OK)
+    assert verdict == "hors_plan" and signaux == []          # aucun seuil sans prévu
+
+
+def test_ef_trop_intense_orange():
+    verdict, signaux = metrics.evaluer_seance(course(temps_zones_pct={"z2": 30, "z3": 65, "z4": 5}), {"type": "EF"}, SANTE_OK)
+    assert verdict == "orange" and [x.nom for x in signaux] == ["ef_intensite"]
+
+
+def test_seuils_de_course():
+    longue = metrics.evaluer_seance(course(temps_zones_pct={"z3": 50, "z4": 35}), {"type": "sortie_longue"}, SANTE_OK)
+    assert longue[0] == "orange" and longue[1][0].nom == "longue_intensite"
+    ratee = metrics.evaluer_seance(course(temps_zones_pct={"z2": 70, "z3": 25, "z4": 5}), {"type": "intervals"}, SANTE_OK)
+    assert ratee[0] == "orange" and ratee[1][0].nom == "intervals_non_atteints"
+
+
+def test_plusieurs_oranges_jamais_rouge():
+    r = course(duree_min=80, distance_km=14, temps_zones_pct={"z3": 70, "z4": 20})
+    verdict, signaux = metrics.evaluer_seance(r, {"type": "EF", "duree_min": 45, "distance_km": 8}, SANTE_OK)
+    assert len(signaux) == 3 and verdict == "orange"
 
 
 def test_squash_jamais_d_alerte_de_zones():
-    s = {**seance(0, 150, "squash"), "temps_zones_pct": ZONES_INTENSES, "distance_km": 0}
-    for prevu in ({"type": "EF"}, {"type": "sortie_longue"}, {"type": "squash", "distance_km": 5}, None):
-        verdict, signaux = metrics.evaluer_seance(s, prevu, None)
-        assert verdict == "vert" and signaux == [], prevu
+    s = {"famille": "squash", "duree_min": 60, "temps_zones_pct": ZONES_INTENSES}
+    for prevu in ({"type": "squash", "duree_min": 60}, {"type": "EF"}, {"type": "sortie_longue"}):
+        assert metrics.evaluer_seance(s, prevu, SANTE_OK) == ("vert", []), prevu
 
 
-def test_velo_et_muscu_sans_seuils_de_course():
-    for fam in ("velo", "muscu"):
-        s = {**seance(0, 140, fam), "temps_zones_pct": {"z3": 70, "z4": 20}, "distance_km": 30}
-        verdict, _ = metrics.evaluer_seance(s, {"type": "EF", "distance_km": 10}, None)
-        assert verdict == "vert", fam
+def test_ecart_de_duree_toutes_disciplines():
+    s = {"famille": "muscu", "duree_min": 30, "temps_zones_pct": {"z1": 100}}
+    verdict, signaux = metrics.evaluer_seance(s, {"type": "muscu_pull", "duree_min": 60}, SANTE_OK)
+    assert verdict == "orange" and signaux[0].nom == "ecart_duree"
 
 
-def test_squash_garde_recovery_et_acwr():
-    s = {**seance(0, 150, "squash"), "temps_zones_pct": ZONES_INTENSES, "recovery_time_h": 60}
-    a = metrics.calculer_acwr(quotidiennes(28, 50, fin=7) + quotidiennes(7, 150), REF)
-    assert a.zone == "danger"
-    verdict, signaux = metrics.evaluer_seance(s, None, a)
-    assert verdict == "rouge"
-    assert {x.nom for x in signaux} == {"acwr", "recovery"}
+def test_rouges_de_securite():
+    assert metrics.evaluer_seance(course(douleur=5), None, SANTE_OK)[0] == "rouge"
+    vigilance = {"niveau": "vigilance", "zones": ["Achille D"]}
+    assert metrics.evaluer_seance(course(douleur=2, douleur_zone="Achille D"), {"type": "EF"}, vigilance)[0] == "rouge"
+    assert metrics.evaluer_seance(course(douleur=2, douleur_zone="Dos"), {"type": "EF"}, vigilance)[0] == "vert"
+    blessure = {"niveau": "blessure", "zones": ["Fascia G"]}
+    assert metrics.evaluer_seance(course(), {"type": "EF"}, blessure)[0] == "rouge"
+    assert metrics.evaluer_seance({"famille": "velo", "duree_min": 40}, None, blessure)[0] == "hors_plan"
 
 
-def test_course_garde_ses_seuils():
-    s = {**seance(0, 140), "temps_zones_pct": {"z3": 65}}
-    verdict, signaux = metrics.evaluer_seance(s, {"type": "EF"}, None)
-    assert verdict == "rouge" and {x.nom for x in signaux} == {"epoc_sur_ef", "z3_sur_ef"}
+def test_recovery_rouge_seulement_si_chevauchement():
+    s = course(recovery_time_h=60)
+    assert metrics.evaluer_seance(s, {"type": "EF"}, SANTE_OK, prochaine_qualite_dans_h=30)[0] == "rouge"
+    assert metrics.evaluer_seance(s, {"type": "EF"}, SANTE_OK, prochaine_qualite_dans_h=72)[0] == "vert"
+    assert metrics.evaluer_seance(s, {"type": "EF"}, SANTE_OK, None)[0] == "vert"
+    assert metrics.evaluer_seance(course(recovery_time_h=40), {"type": "EF"}, SANTE_OK, 20)[0] == "vert"
+
+
+def test_squash_35_min_ne_genere_pas_de_rouge():
+    s = {"famille": "squash", "duree_min": 35, "epoc": 180, "recovery_time_h": 30,
+         "temps_zones_s": {"z2": 300, "z4": 1200, "z5": 600}, "temps_zones_pct": {"z2": 14, "z4": 57, "z5": 29}}
+    assert metrics.evaluer_seance(s, {"type": "squash", "duree_min": 35}, SANTE_OK, 20)[0] == "vert"
 
 
 # ---- Section 2 (v4) : charge = TRIMP d'Edwards ----------------------------------------

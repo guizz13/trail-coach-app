@@ -55,7 +55,10 @@ const FAMILLES = {
   muscu: "Musculation", autre: "Autre", inconnu: "Inconnu",
 };
 const STATUTS = { prevu: "À faire", realise: "Fait", manque: "Manqué", modifie: "Modifié" };
-const VERDICTS = { vert: "conforme", orange: "attention", rouge: "alerte" };
+const VERDICTS = { vert: "conforme", orange: "écart", rouge: "alerte", hors_plan: "hors plan" };
+// Zones de santé (statut Vigilance / Blessure, douleur déclarée)
+const ZONES_SANTE = ["Achille G", "Achille D", "Fascia G", "Fascia D", "Mollet G", "Mollet D",
+  "Genou G", "Genou D", "Hanche", "Dos", "Épaule", "Autre"];
 const PRIORITES = { A: "Objectif principal", B: "Course prévue", C: "Participation" };
 const CLASSE_PRIORITE = { A: "orange", B: "accent", C: "" };
 const TYPES_EVT = { trail_race: "Trail", squash_competition: "Compétition squash", other: "Autre" };
