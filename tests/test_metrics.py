@@ -142,3 +142,17 @@ def test_charge_ordres_de_grandeur():
     sans_fc = {"duree_min": 40, "temps_zones_s": {}}
     assert metrics.charge_seance(sans_fc) == 80          # hypothèse Z2 moyenne
     assert metrics.charge_seance({"duree_min": 30, "epoc": 300}) == 60   # l'EPOC n'entre plus en jeu
+
+
+def test_initialisation_sur_la_moyenne_des_7_premiers_jours():
+    charges = [(REF - timedelta(days=30 - i), c) for i, c in enumerate([210, 0, 0, 70, 0, 70, 70] + [60] * 24)]
+    serie = metrics.serie_acwr(charges)
+    depart = sum([210, 0, 0, 70, 0, 70, 70]) / 7                       # 60, pas 210
+    assert serie[0]["aigu"] == pytest.approx(depart + metrics.LAMBDA_AIGU * (210 - depart))
+    assert serie[0]["chronique"] == pytest.approx(depart + metrics.LAMBDA_CHRONIQUE * (210 - depart))
+    assert serie[-1]["ratio"] == pytest.approx(1.0, abs=0.05)          # régime établi à 60/jour
+
+
+def test_initialisation_avec_moins_de_7_jours():
+    serie = metrics.serie_acwr([(REF, 40.0), (REF + timedelta(days=1), 80.0)])
+    assert serie[0]["chronique"] == pytest.approx(60 + metrics.LAMBDA_CHRONIQUE * (40 - 60))

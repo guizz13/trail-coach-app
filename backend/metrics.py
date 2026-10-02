@@ -76,15 +76,20 @@ def charges_par_jour(seances: Iterable[dict], du: date, au: date) -> list[tuple[
     return [(du + timedelta(days=i), totaux.get(du + timedelta(days=i), 0.0)) for i in range((au - du).days + 1)]
 
 
+JOURS_INITIALISATION = 7
+
+
 def serie_acwr(charges: list[tuple[date, float]]) -> list[dict]:
-    aigu = chronique = None
+    """charges : jours consécutifs, sans trou. Les deux moyennes partent de la charge quotidienne
+    moyenne des 7 premiers jours (et non de la charge du seul premier jour, qui faussait le départ)."""
+    if not charges:
+        return []
+    premiers = [c for _, c in charges[:JOURS_INITIALISATION]]
+    aigu = chronique = sum(premiers) / len(premiers)
     serie = []
-    for jour, charge in charges:                 # jours consécutifs, sans trou
-        if aigu is None:
-            aigu = chronique = charge
-        else:
-            aigu = aigu + LAMBDA_AIGU * (charge - aigu)
-            chronique = chronique + LAMBDA_CHRONIQUE * (charge - chronique)
+    for jour, charge in charges:
+        aigu = aigu + LAMBDA_AIGU * (charge - aigu)
+        chronique = chronique + LAMBDA_CHRONIQUE * (charge - chronique)
         ratio = aigu / chronique if chronique and chronique > 1 else None
         serie.append({"date": jour, "aigu": aigu, "chronique": chronique, "ratio": ratio})
     return serie
