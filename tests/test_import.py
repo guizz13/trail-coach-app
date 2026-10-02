@@ -124,10 +124,10 @@ def test_acwr_et_distribution():
         services.importer_et_analyser(lire(nom), f"{nom}.json")
     from datetime import date
     a = services.acwr_au(date(2026, 9, 23))
-    charges = {x["famille"]: x["charge"] for x in db.fetch_all("SELECT famille, charge FROM seances_realisees")}
-    # Aiguë 17-23 sept : muscu + vélo + tapis ; chronique : outdoor (15) + squash (27/08)
-    assert a.charge_aigue == pytest.approx(charges["muscu"] + charges["velo"] + charges["course_tapis"], abs=0.5)
-    assert a.charge_chronique == pytest.approx((charges["course_outdoor"] + charges["squash"]) / 4, abs=0.5)
+    # Historique depuis le 27/08 mais aucun entraînement du 28/08 au 14/09 : trou > 10 j → calibrage
+    assert a.zone == "calibrage" and a.ratio is None
+    assert services.acwr_dict(a) == {"ratio": None, "zone": "calibrage", "verdict": "vert",
+                                     "jours_historique": 27, "jours_calibrage": 21}
     dist = services.distribution_semaine(date(2026, 9, 21))
     assert dist["z1_z2"] > 90
 

@@ -6,7 +6,7 @@ La charge d'une séance est le TRIMP d'Edwards (minutes × poids de zone), pas l
 Le LLM reçoit les résultats et les interprète ; il ne les recalcule pas.
 
 Références :
-  - ACWR : Gabbett 2016 — zone optimale 0,8-1,3, danger > 1,5
+  - ACWR : Gabbett 2016 — zone optimale 0,8-1,3, danger > 1,5 ; calcul EWMA (Williams et al. 2017)
   - Distribution polarisée : Seiler & Kjerland 2006 — cible ~80 % Z1-Z2
   - Seuils d'alerte : section 9 du system prompt
 """
@@ -43,66 +43,111 @@ def charge_semaine(seances: Iterable[dict]) -> float:
 
 
 # ---------------------------------------------------------------------------
-# ACWR
+# ACWR : moyennes mobiles exponentielles (Williams et al. 2017) + calibrage
 # ---------------------------------------------------------------------------
+LAMBDA_AIGU = 2 / (7 + 1)          # 0,25
+LAMBDA_CHRONIQUE = 2 / (28 + 1)    # ≈ 0,069
+JOURS_CALIBRAGE = 21               # historique minimal avant d'exposer un ratio
+TROU_MAX_JOURS = 10                # trou toléré (jours consécutifs sans séance) sur les 28 derniers jours
+FENETRE_TROU = 28
+
+
 @dataclass
 class ACWR:
-    charge_aigue: float          # semaine en cours (7 derniers jours)
-    charge_chronique: float      # moyenne des 4 semaines précédentes
-    ratio: Optional[float]
-    zone: str                    # sous_charge | optimal | vigilance | danger | insuffisant
+    charge_aigue: float          # EWMA 7 j de la charge quotidienne
+    charge_chronique: float      # EWMA 28 j
+    ratio: Optional[float]       # None pendant le calibrage : jamais affiché ni utilisé
+    zone: str                    # calibrage | sous_charge | optimal | vigilance | danger
+    jours_historique: int = 0    # jours depuis la première séance
 
     @property
     def verdict(self) -> str:
-        return {"sous_charge": "vert", "optimal": "vert", "vigilance": "orange", "danger": "rouge",
-                "insuffisant": "vert"}[self.zone]
+        return {"calibrage": "vert", "sous_charge": "vert", "optimal": "vert",
+                "vigilance": "orange", "danger": "rouge"}[self.zone]
 
 
-# En dessous de 14 jours d'historique dans la fenêtre chronique, le ratio n'est pas fiable
-JOURS_HISTORIQUE_MIN = 14
+def charges_par_jour(seances: Iterable[dict], du: date, au: date) -> list[tuple[date, float]]:
+    """Charge quotidienne totale (toutes disciplines), jours consécutifs, 0 les jours sans séance."""
+    totaux: dict[date, float] = {}
+    for s in seances:
+        d = _date_de(s)
+        if d is not None and du <= d <= au:
+            totaux[d] = totaux.get(d, 0.0) + charge_seance(s)
+    return [(du + timedelta(days=i), totaux.get(du + timedelta(days=i), 0.0)) for i in range((au - du).days + 1)]
+
+
+def serie_acwr(charges: list[tuple[date, float]]) -> list[dict]:
+    aigu = chronique = None
+    serie = []
+    for jour, charge in charges:                 # jours consécutifs, sans trou
+        if aigu is None:
+            aigu = chronique = charge
+        else:
+            aigu = aigu + LAMBDA_AIGU * (charge - aigu)
+            chronique = chronique + LAMBDA_CHRONIQUE * (charge - chronique)
+        ratio = aigu / chronique if chronique and chronique > 1 else None
+        serie.append({"date": jour, "aigu": aigu, "chronique": chronique, "ratio": ratio})
+    return serie
+
+
+def zone_ratio(ratio: float) -> str:
+    if ratio < 0.8:
+        return "sous_charge"
+    if ratio <= 1.3:
+        return "optimal"
+    if ratio <= 1.5:
+        return "vigilance"
+    return "danger"
+
+
+def calibre(dates_seances: set, jour: date) -> tuple[bool, int]:
+    """Historique fiable si la première séance date d'au moins 21 jours et qu'aucun trou
+    de plus de 10 jours consécutifs sans séance n'existe sur les 28 derniers jours."""
+    passees = [d for d in dates_seances if d <= jour]
+    if not passees:
+        return False, 0
+    jours = (jour - min(passees)).days
+    if jours < JOURS_CALIBRAGE:
+        return False, jours
+    trou = plus_long = 0
+    for k in range(FENETRE_TROU):
+        if jour - timedelta(days=FENETRE_TROU - 1 - k) in dates_seances:
+            trou = 0
+        else:
+            trou += 1
+            plus_long = max(plus_long, trou)
+    return plus_long <= TROU_MAX_JOURS, jours
+
+
+def serie_quotidienne(seances: list[dict], au: date) -> list[dict]:
+    """Série jour par jour, de la première séance à `au` : aigu, chronique, ratio (None en
+    calibrage), zone et jours d'historique."""
+    dates = {d for d in (_date_de(s) for s in seances) if d is not None and d <= au}
+    if not dates:
+        return []
+    serie = serie_acwr(charges_par_jour(seances, min(dates), au))
+    for point in serie:
+        ok, jours = calibre(dates, point["date"])
+        point["jours_historique"] = jours
+        if not ok or point["ratio"] is None:
+            point["ratio"], point["zone"] = None, "calibrage"
+        else:
+            point["ratio"] = round(point["ratio"], 2)
+            point["zone"] = zone_ratio(point["ratio"])
+    return serie
 
 
 def calculer_acwr(seances: list[dict], date_ref: Optional[date] = None) -> ACWR:
     """
-    seances : liste de dicts avec au moins 'date_debut' (ISO) et les champs de charge.
-    date_ref : fin de la fenêtre aiguë (défaut : aujourd'hui).
+    seances : toutes les séances depuis la première (l'EWMA démarre au premier jour importé).
+    date_ref : jour évalué (défaut : aujourd'hui).
     """
     date_ref = date_ref or date.today()
-    debut_aigue = date_ref - timedelta(days=6)
-    debut_chronique = date_ref - timedelta(days=34)   # 4 semaines avant la fenêtre aiguë
-
-    aigue, chronique = [], []
-    for s in seances:
-        d = _date_de(s)
-        if d is None:
-            continue
-        if debut_aigue <= d <= date_ref:
-            aigue.append(s)
-        elif debut_chronique <= d < debut_aigue:
-            chronique.append(s)
-
-    ca = charge_semaine(aigue)
-    cc = charge_semaine(chronique) / 4 if chronique else 0.0
-
-    # Historique couvert par la fenêtre chronique : de la plus ancienne séance au début de la fenêtre aiguë
-    dates_chroniques = [d for d in (_date_de(s) for s in chronique) if d]
-    jours_historique = (debut_aigue - min(dates_chroniques)).days if dates_chroniques else 0
-    if jours_historique < JOURS_HISTORIQUE_MIN:
-        return ACWR(ca, cc, round(ca / cc, 2) if cc else None, "insuffisant")
-
-    if cc == 0:
-        return ACWR(ca, cc, None, "sous_charge" if ca == 0 else "optimal")
-
-    ratio = round(ca / cc, 2)
-    if ratio < 0.8:
-        zone = "sous_charge"
-    elif ratio <= 1.3:
-        zone = "optimal"
-    elif ratio <= 1.5:
-        zone = "vigilance"
-    else:
-        zone = "danger"
-    return ACWR(ca, cc, ratio, zone)
+    serie = serie_quotidienne(seances, date_ref)
+    if not serie:
+        return ACWR(0.0, 0.0, None, "calibrage", 0)
+    p = serie[-1]
+    return ACWR(p["aigu"], p["chronique"], p["ratio"], p["zone"], p["jours_historique"])
 
 
 def _date_de(s: dict) -> Optional[date]:
@@ -153,7 +198,6 @@ SEUILS = {
     "acwr":           {"orange": 1.4, "rouge": 1.5},
     "recovery_h":     {"rouge": 48},
 }
-CHARGE_CHRONIQUE_MIN = 50      # charge hebdo moyenne en dessous de laquelle l'ACWR n'alerte pas
 FAMILLES_COURSE = {"course_outdoor", "course_tapis"}
 
 
@@ -205,8 +249,8 @@ def evaluer_seance(realise: dict, prevu: Optional[dict], acwr: Optional[ACWR],
                f"écart de {ecart:.0f} % entre {realise['distance_km']} km réalisés et {prevu['distance_km']} km prévus")
 
     # ACWR : pas d'alerte tant que l'historique de charge est trop court pour être fiable
-    if acwr and (acwr.zone == "insuffisant" or acwr.charge_chronique < CHARGE_CHRONIQUE_MIN):
-        signaux.append(Signal("acwr", "info", round(acwr.charge_chronique, 1), CHARGE_CHRONIQUE_MIN,
+    if acwr and acwr.zone == "calibrage":
+        signaux.append(Signal("acwr", "info", acwr.jours_historique, JOURS_CALIBRAGE,
                               "Historique de charge trop court pour évaluer"))
     elif acwr and acwr.ratio is not None:
         _check(signaux, "acwr", acwr.ratio, SEUILS["acwr"],

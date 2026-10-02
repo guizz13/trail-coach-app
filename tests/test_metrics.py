@@ -2,6 +2,8 @@
 
 from datetime import date, timedelta
 
+import pytest
+
 import metrics
 
 REF = date(2026, 9, 25)
@@ -13,46 +15,55 @@ def seance(jours_avant: int, charge: float, famille: str = "course_outdoor") -> 
             "epoc": charge, "famille": famille}
 
 
-# ---- Point 4 : ACWR ------------------------------------------------------------
-def test_acwr_sans_historique_chronique():
-    a = metrics.calculer_acwr([seance(1, 120), seance(3, 80)], REF)
-    assert a.zone == "insuffisant" and a.ratio is None and a.verdict == "vert"
+# ---- Section 3 (v4) : ACWR EWMA + calibrage ----------------------------------------------
+def quotidiennes(jours: int, charge: float, fin: int = 0) -> list[dict]:
+    """Une séance par jour, de `fin + jours - 1` jours avant REF jusqu'à `fin` jours avant."""
+    return [seance(j, charge) for j in range(fin, fin + jours)]
 
 
-def test_acwr_historique_court_ne_passe_pas_en_danger():
-    # Chronique : une seule séance 10 jours avant la fenêtre aiguë → ratio 3,4 mais non fiable
-    a = metrics.calculer_acwr([seance(16, 150), seance(1, 128)], REF)
-    assert a.ratio == round(128 / (150 / 4), 2)
-    assert a.zone == "insuffisant"
+def test_calibrage_17_jours():
+    a = metrics.calculer_acwr(quotidiennes(18, 60), REF)      # première séance il y a 17 jours
+    assert (a.zone, a.ratio, a.jours_historique) == ("calibrage", None, 17)
+    assert a.verdict == "vert"
 
 
-def test_acwr_historique_suffisant():
-    chronique = [seance(j, 100) for j in (8, 12, 16, 20, 24, 28, 32)]
-    a = metrics.calculer_acwr(chronique + [seance(1, 400)], REF)
-    assert a.zone == "danger" and a.ratio == round(400 / 175, 2)
+def test_calibrage_si_trou_de_plus_de_10_jours():
+    # 40 jours d'historique, mais rien depuis 12 jours
+    a = metrics.calculer_acwr(quotidiennes(28, 60, fin=12), REF)
+    assert a.zone == "calibrage" and a.ratio is None
 
 
-def test_signal_info_si_historique_insuffisant():
-    a = metrics.calculer_acwr([seance(16, 150), seance(1, 128)], REF)
-    verdict, signaux = metrics.evaluer_seance(seance(1, 128), None, a)
-    assert verdict == "vert"
-    assert [(s.nom, s.niveau, s.detail) for s in signaux] == [("acwr", "info", "Historique de charge trop court pour évaluer")]
+def test_charge_constante_ratio_un():
+    a = metrics.calculer_acwr(quotidiennes(42, 60), REF)
+    assert a.ratio == pytest.approx(1.0, abs=0.01) and a.zone == "optimal"
 
 
-def test_signal_info_si_charge_chronique_faible():
-    # Historique assez long mais charge chronique moyenne < 50 : pas d'alerte ACWR
-    chronique = [seance(j, 20) for j in (8, 20, 32)]
-    a = metrics.calculer_acwr(chronique + [seance(1, 100)], REF)
-    assert a.zone == "danger" and a.charge_chronique < 50
-    verdict, signaux = metrics.evaluer_seance(seance(1, 100), None, a)
-    assert verdict == "vert" and signaux[0].niveau == "info"
+def test_quatre_seances_par_semaine_regulieres():
+    seances = [seance(j, 80) for j in range(42) if j % 7 in (0, 2, 4, 5)]
+    a = metrics.calculer_acwr(seances, REF)
+    assert 0.8 <= a.ratio <= 1.3
 
 
-def test_alerte_acwr_conservee_si_historique_fiable():
-    chronique = [seance(j, 100) for j in (8, 12, 16, 20, 24, 28, 32)]
-    a = metrics.calculer_acwr(chronique + [seance(1, 400)], REF)
-    verdict, signaux = metrics.evaluer_seance(seance(1, 400), None, a)
-    assert verdict == "rouge" and signaux[0].nom == "acwr" and signaux[0].niveau == "rouge"
+def test_semaine_doublee_signal_conserve():
+    seances = quotidiennes(28, 50, fin=7) + quotidiennes(7, 100)
+    a = metrics.calculer_acwr(seances, REF)
+    assert 1.3 <= a.ratio <= 1.6 and a.zone in ("vigilance", "danger")
+
+
+def test_serie_quotidienne_sans_ratio_en_calibrage():
+    serie = metrics.serie_quotidienne(quotidiennes(30, 60), REF)
+    assert len(serie) == 30
+    assert all(p["ratio"] is None for p in serie[:21]) and all(p["ratio"] is not None for p in serie[21:])
+
+
+def test_sans_seance():
+    assert metrics.calculer_acwr([], REF).zone == "calibrage"
+
+
+def test_signal_info_pendant_le_calibrage():
+    a = metrics.calculer_acwr(quotidiennes(10, 60), REF)
+    verdict, signaux = metrics.evaluer_seance(seance(0, 60), None, a)
+    assert verdict == "vert" and [x.niveau for x in signaux] == ["info"]
 
 
 # ---- Point 5 : seuils par discipline -------------------------------------------------
@@ -75,8 +86,8 @@ def test_velo_et_muscu_sans_seuils_de_course():
 
 def test_squash_garde_recovery_et_acwr():
     s = {**seance(0, 150, "squash"), "temps_zones_pct": ZONES_INTENSES, "recovery_time_h": 60}
-    chronique = [seance(j, 100) for j in (8, 12, 16, 20, 24, 28, 32)]
-    a = metrics.calculer_acwr(chronique + [seance(0, 400, "squash")], REF)
+    a = metrics.calculer_acwr(quotidiennes(28, 50, fin=7) + quotidiennes(7, 150), REF)
+    assert a.zone == "danger"
     verdict, signaux = metrics.evaluer_seance(s, None, a)
     assert verdict == "rouge"
     assert {x.nom for x in signaux} == {"acwr", "recovery"}

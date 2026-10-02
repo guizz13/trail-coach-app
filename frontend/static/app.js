@@ -224,18 +224,28 @@ function barreZones(dist) {
 }
 const zonesDepuisPct = p => ({ z1_z2: (p?.z1 || 0) + (p?.z2 || 0), z3: p?.z3 || 0, z4_z5: (p?.z4 || 0) + (p?.z5 || 0) });
 
+// Sous-charge : violet clair atténué, jamais rouge (normal en rééducation)
 function couleurRatio(r) {
   if (r == null) return "var(--text-muted)";
-  if (r > 1.5 || r < 0.8) return "var(--red)";
-  if (r > 1.3) return "var(--orange)";
-  return "var(--green)";
+  if (r < 0.8) return "rgba(167, 139, 250, 0.6)";
+  if (r <= 1.3) return "var(--green)";
+  if (r <= 1.5) return "var(--orange)";
+  return "var(--red)";
 }
 
-// Jauge équilibre de charge : 0 → 2, marqueur coloré selon la zone
-function jaugeCharge(ratio) {
-  const pos = ratio == null ? 50 : Math.max(0, Math.min(100, ratio / 2 * 100));
-  return `<div class="jauge" role="img" aria-label="Équilibre de charge ${ratio == null ? "indisponible" : nb(ratio, 2)}">
-      <div class="marqueur" style="left:${pos}%;background:${couleurRatio(ratio)}"></div></div>
+// Équilibre de charge : a = {ratio, zone, jours_historique, jours_calibrage} (acwr de l'API)
+function enCalibrage(a) { return !a || a.zone === "calibrage" || a.ratio == null; }
+function libelleCalibrage(a) { return `Calibrage · J ${Math.min(a?.jours_historique ?? 0, 21)}/${a?.jours_calibrage ?? 21}`; }
+
+// Jauge 0 → 2 ; grisée et sans marqueur pendant le calibrage
+function jaugeCharge(a) {
+  if (enCalibrage(a)) {
+    return `<div class="jauge calibrage" role="img" aria-label="${esc(libelleCalibrage(a))}"></div>
+      <div class="jauge-zones"><span>sous-charge</span><span>optimal</span><span>danger</span></div>`;
+  }
+  const pos = Math.max(0, Math.min(100, a.ratio / 2 * 100));
+  return `<div class="jauge" role="img" aria-label="Équilibre de charge ${nb(a.ratio, 2)}">
+      <div class="marqueur" style="left:${pos}%;background:${couleurRatio(a.ratio)}"></div></div>
     <div class="jauge-zones"><span>sous-charge</span><span>optimal</span><span>danger</span></div>`;
 }
 
@@ -373,6 +383,8 @@ function graphCourbe(conteneur, points, opts = {}) {
     }
   }
   for (const s of segs) svgEl("polyline", { points: s.map(p => p.join(",")).join(" "), class: "courbe", stroke: couleur }, svg);
+  // Points marqués (ex. valeur écrêtée) : pastille de couleur sur la courbe
+  points.forEach((p, i) => { if (p.marque && p.valeur != null) svgEl("circle", { cx: x(i), cy: y(p.valeur), r: 3.5, fill: p.marque, stroke: "var(--bg-card)", "stroke-width": 1.5 }, svg); });
   const dernier = points.map((p, i) => [p, i]).filter(([p]) => p.valeur != null).pop();
   if (dernier) svgEl("circle", { cx: x(dernier[1]), cy: y(dernier[0].valeur), r: 3.5, fill: couleur }, svg);
 

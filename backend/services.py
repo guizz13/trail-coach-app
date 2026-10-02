@@ -404,8 +404,8 @@ def _prochaine_qualite_dans_h(seance: dict) -> Optional[float]:
 
 
 def acwr_au(d: date) -> metrics.ACWR:
-    seances = db.seances_entre((d - timedelta(days=34)).isoformat(), d.isoformat())
-    return metrics.calculer_acwr(seances, date_ref=d)
+    """ACWR au jour d : l'EWMA part de la première séance importée."""
+    return metrics.calculer_acwr(db.seances_entre("0000-01-01", d.isoformat()), date_ref=d)
 
 
 def distribution_semaine(lundi: date) -> dict:
@@ -415,7 +415,11 @@ def distribution_semaine(lundi: date) -> dict:
 
 
 def acwr_dict(a: metrics.ACWR) -> dict:
-    return {"ratio": a.ratio, "zone": a.zone, "verdict": a.verdict,
+    """Pendant le calibrage, ni ratio ni charges : seul l'avancement (J X/21) est exposé."""
+    if a.zone == "calibrage":
+        return {"ratio": None, "zone": "calibrage", "verdict": a.verdict,
+                "jours_historique": a.jours_historique, "jours_calibrage": metrics.JOURS_CALIBRAGE}
+    return {"ratio": a.ratio, "zone": a.zone, "verdict": a.verdict, "jours_historique": a.jours_historique,
             "charge_aigue": round(a.charge_aigue, 1), "charge_chronique": round(a.charge_chronique, 1)}
 
 
@@ -669,9 +673,16 @@ def graphiques(nb_semaines: int = 12, d: Optional[date] = None) -> dict:
             "km": round(sum(s["distance_km"] or 0 for s in course), 2),
             "dplus": round(sum(s["dplus_m"] or 0 for s in course)),
             "charge": round(metrics.charge_semaine(toutes), 1),
-            "acwr": a.ratio,
+            "acwr": a.ratio,                     # fin de semaine, None en calibrage
+            "acwr_zone": a.zone,
+            "jours_historique": a.jours_historique,
         })
-    return {"semaines": semaines, "poids": db.poids_liste()}
+    # Série quotidienne de l'ACWR sur 26 semaines (graphique Stats) ; ratio None les jours de calibrage
+    debut = lundi_courant - timedelta(weeks=25)
+    serie = [{"date": p["date"].isoformat(), "ratio": p["ratio"], "zone": p["zone"]}
+             for p in metrics.serie_quotidienne(db.seances_entre("0000-01-01", d.isoformat()), d)
+             if p["date"] >= debut]
+    return {"semaines": semaines, "acwr_quotidien": serie, "poids": db.poids_liste()}
 
 
 def charges_muscu() -> dict:
@@ -1035,7 +1046,8 @@ def bilan_hebdo(imperatifs: dict) -> dict:
     # 3. Indicateurs
     course = [s for s in ecoulee if s["famille"] in extractor.FAMILLE_COURSE]
     indicateurs = {
-        "acwr": acwr_dict(acwr_au(min(dimanche_prec, aujourdhui()))),
+        # Absent pendant le calibrage : le LLM ne reçoit jamais un ratio non fiable
+        **({} if (a := acwr_au(min(dimanche_prec, aujourdhui()))).zone == "calibrage" else {"acwr": acwr_dict(a)}),
         "distribution_hebdo": metrics.distribution_hebdo(course),
         "volume_course_km": round(sum(s["distance_km"] or 0 for s in course), 2),
         "d_plus_m": round(sum(s["dplus_m"] or 0 for s in course)),

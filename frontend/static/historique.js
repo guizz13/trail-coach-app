@@ -42,20 +42,32 @@ function rendreVolume() {
 }
 
 // ---- Équilibre de charge : l'API fournit les 12 dernières semaines ------------------------
+// Série quotidienne (un point par jour) ; jours de calibrage non tracés ; écrêtage à 2 avec marqueur
 function rendreCharge() {
-  const sem = graphiques.semaines.slice(-Math.min(semaines, graphiques.semaines.length));
-  const n = sem.length;
-  graphCourbe($("#g-acwr"), sem.map(s => ({ valeur: s.acwr, detail: `semaine du ${dateFR(s.lundi, { day: "numeric", month: "short" })}` })), {
+  const depuis = debutPeriode();
+  const serie = graphiques.acwr_quotidien.filter(p => p.date >= depuis);
+  const el = $("#g-acwr");
+  if (!serie.some(p => p.ratio != null)) {
+    el.innerHTML = `<div class="vide" style="padding:24px 0;text-align:center">Calibrage en cours</div>`;
+    $("#acwr-note").textContent = "Le ratio s'affiche après 21 jours d'historique régulier.";
+    return;
+  }
+  const n = serie.length;
+  graphCourbe(el, serie.map(p => ({
+    valeur: p.ratio == null ? null : Math.min(p.ratio, 2),
+    marque: p.ratio > 2 ? "var(--red)" : null,
+    detail: `${dateFR(p.date, { weekday: "short", day: "numeric", month: "short" })}${p.ratio > 2 ? ` · réel ${nb(p.ratio, 2)}` : ""}`,
+  })), {
     min: 0, max: 2, dec: 2, hauteur: 150, couleur: "var(--text-primary)", titre: "Équilibre de charge",
     bandes: [
       { de: 0.8, a: 1.3, couleur: "rgba(45,212,160,.12)" },
       { de: 1.3, a: 1.5, couleur: "rgba(245,166,35,.12)" },
       { de: 1.5, a: 99, couleur: "rgba(240,72,72,.12)" },
     ],
-    etiquettes: { 0: `S-${n - 1}`, [n - 1]: "Auj." },
+    etiquettes: { 0: dateFR(serie[0].date, { day: "numeric", month: "short" }), [n - 1]: "Auj." },
   });
   $("#acwr-note").textContent = "Vert : 0,8—1,3 optimal · orange : vigilance · rouge : danger au-delà de 1,5"
-    + (semaines > graphiques.semaines.length ? ` · ${graphiques.semaines.length} dernières semaines disponibles` : "");
+    + " · valeurs au-delà de 2 écrêtées (point rouge)";
 }
 
 // ---- Poids -----------------------------------------------------------------------------

@@ -101,24 +101,24 @@ function rendreCoach(dimanche) {
 }
 
 function rendreForme(courante, realisees, dimanche) {
-  // Équilibre de charge : valeur du jour pour la semaine courante, fin de semaine sinon
-  let ratio = null, sous = "";
+  // Équilibre de charge : valeur du jour pour la semaine courante, fin de semaine sinon.
+  // Pendant le calibrage : jauge grisée, ni valeur ni couleur.
+  let a = null, sous = "";
   if (courante) {
-    // Historique trop court : le ratio n'est pas fiable, on ne l'affiche pas
-    const insuffisant = tableau.acwr.zone === "insuffisant";
-    ratio = insuffisant ? null : tableau.acwr.ratio;
-    sous = insuffisant ? "historique insuffisant pour évaluer"
-      : `aiguë ${nb(tableau.acwr.charge_aigue)} · chronique ${nb(tableau.acwr.charge_chronique)}`;
+    a = tableau.acwr;
+    if (!enCalibrage(a)) sous = `aiguë ${nb(a.charge_aigue)} · chronique ${nb(a.charge_chronique)}`;
   } else {
     const s = graphiques.semaines.find(x => x.lundi === lundiAffiche);
-    ratio = s ? s.acwr : null;
+    a = s ? { ratio: s.acwr, zone: s.acwr_zone, jours_historique: s.jours_historique, jours_calibrage: 21 } : null;
     sous = s ? "en fin de semaine" : dimanche > tableau.aujourdhui ? "semaine à venir" : "hors des 12 dernières semaines";
   }
+  const calib = enCalibrage(a);
   $("#charge").innerHTML = `<div class="label">Équilibre de charge</div>
-    <div class="valeur" style="color:${couleurRatio(ratio)}">${ratio == null ? "—" : nb(ratio, 2)}</div>
-    ${jaugeCharge(ratio)}
-    <div class="sous-texte" style="margin-top:6px">${ratio == null ? "" : nb(ratio, 2) + " / "}0,8—1,3</div>
-    <div class="sous-texte">${esc(sous)}</div>`;
+    <div class="valeur" style="color:${calib ? "var(--text-muted)" : couleurRatio(a.ratio)}${calib ? ";font-size:15px" : ""}">${
+      calib ? (a && a.zone === "calibrage" ? esc(libelleCalibrage(a)) : "—") : nb(a.ratio, 2)}</div>
+    ${jaugeCharge(a)}
+    <div class="sous-texte" style="margin-top:6px">${calib ? "ratio affiché après 21 jours d'historique" : nb(a.ratio, 2) + " / 0,8—1,3"}</div>
+    ${sous ? `<div class="sous-texte">${esc(sous)}</div>` : ""}`;
 
   // Répartition des zones (course) : calculée par l'API pour la semaine courante,
   // agrégée depuis les temps par zone des séances pour les autres semaines

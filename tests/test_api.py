@@ -202,3 +202,12 @@ def test_recalcul_via_api(client):
     assert r.status_code == 200
     assert r.json() == {"seances": 0, "analyses_mises_a_jour": 0, "seances_sans_analyse": 0,
                         "seances_liees": 0, "changements": []}
+
+
+def test_acwr_non_expose_pendant_le_calibrage(client):
+    client.post("/api/import", files={"fichier": ("t.json", lire("course_tapis"))}, data={"options": '{"analyser": false}'})
+    a = client.get("/api/dashboard").json()["acwr"]
+    assert a["zone"] == "calibrage" and a["ratio"] is None
+    assert "charge_aigue" not in a and a["jours_calibrage"] == 21
+    g = client.get("/api/graphiques").json()
+    assert all(p["ratio"] is None for p in g["acwr_quotidien"])
