@@ -191,6 +191,14 @@ SEMAINE_OK = [
     seance("samedi", "sortie_longue", duree=150),
 ]
 
+# Vigilance Achille : jamais deux jours d'impact élevé (course, squash) de suite
+SEMAINE_VIGILANCE = [
+    seance("lundi", "muscu_pull"), seance("lundi", "squash", "soir"),
+    seance("mardi", "velo", duree=50), seance("mercredi", "intervals", duree=50),
+    seance("jeudi", "muscu_push"), seance("vendredi", "velo", duree=45),
+    seance("samedi", "sortie_longue", duree=150),
+]
+
 
 def bilan(seances, jour_repos="dimanche"):
     return {"bilan": {"resume": "ok"}, "position_prepa": None,
@@ -219,7 +227,7 @@ def test_regles_dures():
 
 
 def test_bilan_puis_validation(monkeypatch):
-    faux = brancher(monkeypatch, bilan_hebdo=bilan(SEMAINE_OK))
+    faux = brancher(monkeypatch, bilan_hebdo=bilan(SEMAINE_VIGILANCE))
     services.importer_et_analyser(lire("course_tapis"), "t.json", analyser=False)
     r = services.bilan_hebdo({"semaine_debut": "2026-09-28", "squash": [{"jour": "lundi", "creneau": "soir"}],
                               "contraintes": [{"jour": "jeudi", "creneau": "soir", "raison": "réunion"}],

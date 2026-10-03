@@ -104,8 +104,6 @@ _MOTS_FAMILLE = [
     ("fractionn", "course"), ("côte", "course"), ("cotes", "course"), ("tempo", "course"),
     ("footing", "course"), ("trail", "course"), ("course", "course"),
 ]
-FAMILLE_REALISEE = {"course_outdoor": "course", "course_tapis": "course", "muscu": "muscu",
-                    "squash": "squash", "velo": "velo"}
 
 
 def famille_planifiee(type_: Optional[str]) -> Optional[str]:
@@ -118,8 +116,60 @@ def famille_planifiee(type_: Optional[str]) -> Optional[str]:
     return next((f for mot, f in _MOTS_FAMILLE if mot in t), None)
 
 
-def famille_realisee(famille: Optional[str]) -> Optional[str]:
-    return FAMILLE_REALISEE.get(famille or "")
+# Catégories du catalogue (v5) : la liaison réalisé ↔ prévu se fait par catégorie.
+CATEGORIE_DEPUIS_FAMILLE = {"course": "course", "muscu": "force", "squash": "raquette", "velo": "porte"}
+# Sport représentatif d'un type de séance prévue générique (impact, libellé) ; un type qui est
+# déjà un sport du catalogue (« badminton ») est pris tel quel.
+SPORT_TYPE_GENERIQUE = {"course": "course_route", "force": "muscu", "raquette": "squash", "porte": "velo_salle"}
+# Sports attendus par un type prévu précis : un autre sport de la catégorie est une substitution
+SPORTS_ATTENDUS = {"squash": {"squash"}, "velo": {"velo_route", "velo_salle", "vtt", "gravel"}}
+
+
+def _sport_du_type(type_: Optional[str]) -> Optional[str]:
+    """« badminton », « Badminton », « Vélo route » → id du catalogue ; sinon None."""
+    if type_ in sports.SPORTS_PAR_ID:
+        return type_
+    t = sports.sans_accents((type_ or "").strip())
+    return next((s["id"] for s in sports.SPORTS_PAR_ID.values() if sports.sans_accents(s["libelle"]) == t), None)
+
+
+def categorie_planifiee(type_: Optional[str]) -> Optional[str]:
+    """Catégorie d'une séance prévue : sport du catalogue, sinon types connus et mots-clés."""
+    if "repos" in (type_ or "").lower():
+        return None
+    sid = _sport_du_type(type_)
+    if sid:
+        return sports.categorie(sid)
+    return CATEGORIE_DEPUIS_FAMILLE.get(famille_planifiee(type_) or "")
+
+
+def categorie_realisee(seance: dict) -> Optional[str]:
+    """Catégorie d'une séance réalisée ; aucune tant que le sport reste à préciser (jamais liée)."""
+    if seance.get("sport_a_preciser"):
+        return None
+    return sports.categorie(sports.sport_de(seance))
+
+
+def sport_planifie(type_: Optional[str]) -> Optional[str]:
+    """Sport d'une séance prévue : celui du catalogue, sinon le sport représentatif de sa catégorie."""
+    return _sport_du_type(type_) or SPORT_TYPE_GENERIQUE.get(categorie_planifiee(type_) or "")
+
+
+def impact_planifie(type_: Optional[str]) -> Optional[str]:
+    sid = sport_planifie(type_)
+    return sports.impact(sid) if sid else None
+
+
+def substitution(seance: dict, prevu: Optional[dict]) -> Optional[str]:
+    """« Substitution : badminton au lieu de squash » quand le sport diffère dans la catégorie."""
+    if not prevu:
+        return None
+    sid = sports.sport_de(seance)
+    attendus = SPORTS_ATTENDUS.get(prevu["type"]) or ({_sport_du_type(prevu["type"])} - {None})
+    if not attendus or sid in attendus:
+        return None
+    libelle_prevu = sports.sport(next(iter(attendus)))["libelle"] if len(attendus) == 1 else prevu["type"]
+    return f"Substitution : {sports.sport(sid)['libelle'].lower()} au lieu de {libelle_prevu.lower()}"
 
 
 def split_suivant(dernier: Optional[str]) -> str:
@@ -288,9 +338,9 @@ def relier(du: date, au: date) -> None:
         if s["lien_manuel"]:
             continue
         debut = en_paris(s["date_debut"])
-        fam = famille_realisee(s["famille"])
+        cat = categorie_realisee(s)
         candidats = [p for p in plan if p["date_seance"] == debut.date().isoformat()
-                     and p["seance_realisee_id"] is None and fam and famille_planifiee(p["type"]) == fam]
+                     and p["seance_realisee_id"] is None and cat and categorie_planifiee(p["type"]) == cat]
         if not candidats:
             continue          # hors plan : jamais de liaison automatique sur une autre date
         rang = rang_creneau_realise(debut)
@@ -458,7 +508,7 @@ def recalculer_semaine(lundi: date, modification: Optional[str] = None) -> dict:
 def totaux_semaine(lundi: date) -> dict:
     """Volume prévu vs réalisé (course) et distribution des zones de la semaine."""
     du, au = lundi.isoformat(), (lundi + timedelta(days=6)).isoformat()
-    plan = [p for p in db.planifiees_entre(du, au) if famille_planifiee(p["type"]) == "course"]
+    plan = [p for p in db.planifiees_entre(du, au) if categorie_planifiee(p["type"]) == "course"]
     course = db.seances_entre(du, au, familles=extractor.FAMILLE_COURSE)
     return {
         "course_prevue_min": sum(p["duree_min"] or 0 for p in plan),
@@ -479,9 +529,10 @@ def defaire_liaisons_incoherentes() -> list[dict]:
     (héritage de l'ancien code, qui rangeait les types inconnus en course), puis recalcule les
     semaines touchées. Appelé au démarrage et par le recalcul admin."""
     lignes = db.fetch_all(
-        "SELECT p.id, p.type, p.date_seance, r.id AS realisee, r.famille FROM seances_planifiees p "
+        "SELECT p.id, p.type, p.date_seance, r.id AS realisee, r.famille, r.sport_id, r.sport_a_preciser "
+        "FROM seances_planifiees p "
         "JOIN seances_realisees r ON r.id = p.seance_realisee_id")
-    defaites = [l for l in lignes if famille_planifiee(l["type"]) != famille_realisee(l["famille"])]
+    defaites = [l for l in lignes if categorie_planifiee(l["type"]) != categorie_realisee(l)]
     if not defaites:
         return []
     with db.connexion() as c:
@@ -504,12 +555,12 @@ def _seance_ou_erreur(seance_id: int) -> dict:
 
 
 def candidats_liaison(seance_id: int) -> list[dict]:
-    """Séances prévues non liées, de la même famille, dans la semaine de la séance réalisée."""
+    """Séances prévues non liées, de la même catégorie, dans la semaine de la séance réalisée."""
     s = _seance_ou_erreur(seance_id)
     lundi = lundi_de(date_de(s["date_debut"]))
-    fam = famille_realisee(s["famille"])
+    cat = categorie_realisee(s)
     return [p for p in db.planifiees_entre(lundi.isoformat(), (lundi + timedelta(days=6)).isoformat())
-            if p["seance_realisee_id"] is None and fam and famille_planifiee(p["type"]) == fam]
+            if p["seance_realisee_id"] is None and cat and categorie_planifiee(p["type"]) == cat]
 
 
 def lier(seance_id: int, planifiee_id: int) -> dict:
@@ -517,8 +568,8 @@ def lier(seance_id: int, planifiee_id: int) -> dict:
     p = db.planifiee(planifiee_id)
     if not p:
         raise ValueError("Séance prévue introuvable.")
-    if famille_planifiee(p["type"]) != famille_realisee(s["famille"]):
-        raise ValueError("Liaison refusée : la séance prévue n'est pas de la même discipline.")
+    if not categorie_realisee(s) or categorie_planifiee(p["type"]) != categorie_realisee(s):
+        raise ValueError("Liaison refusée : la séance prévue n'est pas de la même discipline (catégorie de sport).")
     lundi = lundi_de(date_de(s["date_debut"]))
     if lundi_de(date.fromisoformat(p["date_seance"])) != lundi:
         raise ValueError("Liaison refusée : la séance prévue n'est pas dans la même semaine.")
@@ -1149,34 +1200,36 @@ def valider_ajustement(reponse: dict, lundi: date, premier: date) -> list[str]:
             continue
         if not premier <= d <= dimanche:
             violations.append(f"Date {d_iso} hors des jours modifiables ({premier.isoformat()} → {dimanche.isoformat()}).")
-    activites: dict[date, list[tuple[str, Optional[float], str]]] = {}   # jour → (famille, durée, origine)
+    # jour → [(catégorie, durée, origine, sport)]
+    activites: dict[date, list[tuple[str, Optional[float], str, str]]] = {}
     for i in range(7):
         d = lundi + timedelta(days=i)
         jour = []
         for s in db.seances_entre(d.isoformat(), d.isoformat()):
-            if famille_realisee(s["famille"]):
-                jour.append((famille_realisee(s["famille"]), s["duree_min"], "realise"))
+            if categorie_realisee(s):
+                jour.append((categorie_realisee(s), s["duree_min"], "realise", sports.sport_de(s)))
         if d.isoformat() in proposes and d >= premier:
             sources = [(x.get("type"), x.get("duree_min")) for x in proposes[d.isoformat()]]
         else:
             sources = [(p["type"], p["duree_min"]) for p in db.planifiees_entre(d.isoformat(), d.isoformat())
                        if p["seance_realisee_id"] is None and p["statut"] != "manque"]
-        jour += [(famille_planifiee(t), m, "plan") for t, m in sources if famille_planifiee(t)]
+        jour += [(categorie_planifiee(t), m, "plan", sport_planifie(t)) for t, m in sources if categorie_planifiee(t)]
         activites[d] = jour
     if all(activites[d] for d in activites):
         violations.append("Aucun jour de repos complet sur la semaine.")
-    nb_muscu = sum(1 for j in activites.values() for f, _, _ in j if f == "muscu")
+    nb_muscu = sum(1 for j in activites.values() for c, _, _, _ in j if c == "force")
     if nb_muscu < 2:
         violations.append(f"{nb_muscu} séance(s) de musculation sur la semaine (minimum 2).")
     for d, j in activites.items():
         if d.weekday() >= 5:
             continue
         nom = jour_de(d)
-        if any(f == "course" and (m or 0) > TYPES_COURSE_LONGUE_MAX_MIN and o == "plan" for f, m, o in j):
+        if any(c == "course" and (m or 0) > TYPES_COURSE_LONGUE_MAX_MIN and o == "plan" for c, m, o, _ in j):
             violations.append(f"Course de plus de 1h15 en semaine ({nom}).")
-        if {"muscu", "course"} <= {f for f, _, _ in j}:
+        if {"force", "course"} <= {c for c, _, _, _ in j}:
             violations.append(f"Muscu et course le même jour en semaine ({nom}).")
-    violations += regle_vigilance(sum(m or 0 for j in activites.values() for f, m, _ in j if f == "course"), lundi)
+    violations += regle_vigilance(sum(m or 0 for j in activites.values() for c, m, _, _ in j if c == "course"), lundi)
+    violations += regle_impact([(d, sid, o) for d, j in activites.items() for _, _, o, sid in j])
     return violations
 
 
@@ -1267,7 +1320,8 @@ def detail_seance(id_: int) -> Optional[dict]:
         "seance": _seance_publique(s),
         "muscu_detail": db.muscu_detail(id_),
         "analyses": db.analyses_seance(id_),
-        "prevu": prevu_de(id_),
+        "prevu": (prevu := prevu_de(id_)),
+        "substitution": substitution(s, prevu),
     }
 
 
@@ -1604,6 +1658,31 @@ def regle_vigilance(minutes_course: float, lundi: date) -> list[str]:
     return []
 
 
+def regle_impact(seances: list[tuple[date, Optional[str], str]], sante: Optional[dict] = None) -> list[str]:
+    """Vigilance ou Blessure sur le bas du corps : toute séance à impact élevé (course, raquette,
+    sport collectif…) est un jour de charge tendineuse, jamais deux jours consécutifs.
+    En Blessure, aucune séance prévue à impact élevé. seances : [(jour, sport_id, 'plan' | 'realise')]."""
+    sante = sante or sante_profil()
+    zones = set(sante.get("zones") or []) & metrics.ZONES_BAS_DU_CORPS
+    if sante["niveau"] not in ("vigilance", "blessure") or not zones:
+        return []
+    libelle_sante = f"{NIVEAUX_SANTE_LIBELLES[sante['niveau']]} {', '.join(sorted(zones))}"
+    par_jour: dict[date, list[str]] = {}
+    for d, sid, origine in seances:
+        if sid and sports.impact(sid) == "eleve":
+            par_jour.setdefault(d, []).append(sports.sport(sid)["libelle"].lower())
+            if sante["niveau"] == "blessure" and origine == "plan":
+                return [f"{libelle_sante} : {sports.sport(sid)['libelle'].lower()} prévu le {jour_de(d)} "
+                        f"(impact élevé interdit en blessure du bas du corps)."]
+    jours = sorted(par_jour)
+    return [f"{libelle_sante} : impact élevé deux jours de suite ({' + '.join(par_jour[a])} {jour_de(a)}, "
+            f"{' + '.join(par_jour[b])} {jour_de(b)})."
+            for a, b in zip(jours, jours[1:]) if (b - a).days == 1]
+
+
+NIVEAUX_SANTE_LIBELLES = {"vigilance": "Vigilance", "blessure": "Blessure"}
+
+
 def verifier_regles(seances: list[dict], jour_repos: Optional[str] = None, lundi: Optional[date] = None) -> dict:
     """Double sécurité côté code sur la semaine générée.
     Retourne {'bloquantes': [...], 'avertissements': [...]}."""
@@ -1647,8 +1726,15 @@ def verifier_regles(seances: list[dict], jour_repos: Optional[str] = None, lundi
             bloquantes.append(f"Muscu PUSH et squash le même jour ({jour}).")
 
     if lundi is not None:
-        course = sum(s.get("duree_min") or 0 for s in actives if famille_planifiee(s.get("type")) == "course")
+        course = sum(s.get("duree_min") or 0 for s in actives if categorie_planifiee(s.get("type")) == "course")
         bloquantes += regle_vigilance(course, lundi)
+        # Impact élevé : jours prévus + la veille du lundi (séances réalisées)
+        veille = lundi - timedelta(days=1)
+        impact = [(veille, sports.sport_de(x), "realise")
+                  for x in db.seances_entre(veille.isoformat(), veille.isoformat()) if categorie_realisee(x)]
+        impact += [(lundi + timedelta(days=JOURS.index((x.get("jour") or "").lower())), sport_planifie(x.get("type")), "plan")
+                   for x in actives if (x.get("jour") or "").lower() in JOURS]
+        bloquantes += regle_impact(impact)
     return {"bloquantes": bloquantes, "avertissements": avert}
 
 
@@ -1728,7 +1814,7 @@ def bilan_hebdo(imperatifs: dict) -> dict:
             break
         prevues = (reponse.get("semaine_suivante") or {}).get("seances") or []
         exces = regle_vigilance(sum(s.get("duree_min") or 0 for s in prevues if isinstance(s, dict)
-                                    and famille_planifiee(s.get("type")) == "course"), lundi)
+                                    and categorie_planifiee(s.get("type")) == "course"), lundi)
         if not exces or essai == 1:
             break
         imperatifs_llm = {**imperatifs_llm, "erreur_tentative_precedente": "Règle violée, corrige-la : " + exces[0]}

@@ -254,7 +254,8 @@ function rendreLiaison(d, x) {
   };
   if (x.prevu) {
     el.innerHTML = `<div class="liaison"><span>Liée à : <b>${esc(libellePrevu(x.prevu))}</b>${x.seance.lien_manuel ? ` <span class="sous-texte">(manuel)</span>` : ""}</span>
-      <button type="button" class="btn petit" data-delier>Délier</button></div><div class="liaison-erreur"></div>`;
+      <button type="button" class="btn petit" data-delier>Délier</button></div>
+      ${x.substitution ? `<div class="sous-texte" style="margin-top:4px">${esc(x.substitution)}</div>` : ""}<div class="liaison-erreur"></div>`;
     $("[data-delier]", el).onclick = () => apres(api("POST", `/api/seances_realisees/${id}/delier`));
     return;
   }
@@ -268,7 +269,7 @@ function rendreLiaison(d, x) {
       zone.innerHTML = c.length ? c.map(p => `<button type="button" class="objectif-ligne" data-p="${p.id}">
           <span class="seance-corps"><span class="seance-type">${esc(libellePrevu(p))}</span>
           ${p.detail ? `<span class="seance-detail">${esc(p.detail)}</span>` : ""}</span><i class="ti ti-link muted"></i></button>`).join("")
-        : `<div class="vide">Aucune séance prévue de la même discipline libre cette semaine.</div>`;
+        : `<div class="vide">Aucune séance prévue de la même catégorie libre cette semaine.</div>`;
       $$("[data-p]", zone).forEach(b => {
         b.onclick = () => apres(api("POST", `/api/seances_realisees/${id}/lier`, { seance_planifiee_id: Number(b.dataset.p) }));
       });

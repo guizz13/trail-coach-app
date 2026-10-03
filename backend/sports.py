@@ -10,6 +10,7 @@ Le catalogue est figé dans le code : l'utilisateur choisit dans la liste, « au
 
 from __future__ import annotations
 
+import unicodedata
 from typing import Optional
 
 CATEGORIES = {
@@ -99,6 +100,11 @@ def impact(sport_id: Optional[str]) -> str:
 def par_strava(sport_type: Optional[str]) -> Optional[str]:
     """Premier sport du catalogue qui déclare ce sport_type Strava (Walk → randonnée, Workout → poids du corps)."""
     return next((s[0] for s in SPORTS if sport_type in s[6]), None)
+
+
+def sans_accents(texte: str) -> str:
+    """Minuscules sans accents, pour comparer des libellés saisis librement."""
+    return "".join(c for c in unicodedata.normalize("NFD", texte or "") if unicodedata.category(c) != "Mn").lower()
 
 
 def ids_de_categorie(cat: str) -> set[str]:

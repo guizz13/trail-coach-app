@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Iterable, Optional
 
+import sports
+
 
 # ---------------------------------------------------------------------------
 # Charge d'une séance
@@ -220,13 +222,12 @@ SEUILS = {
     "ef_z3_et_plus": 25,        # % du temps ≥ Z3 sur une EF prévue (orange)
     "longue_z45": 30,           # % du temps en Z4-Z5 sur une sortie longue prévue (orange)
     "intervals_z45_min": 8,     # % minimal en Z4-Z5 sur des intervalles prévus (orange : qualité ratée)
-    "ecart_pct": 25,            # écart de durée ou de distance vs prévu (orange) — course et vélo
-    "duree_min_pct": 60,        # muscu / squash : écart seulement sous 60 % de la durée prévue
+    "ecart_pct": 25,            # écart de durée ou de distance vs prévu (orange) — course et sports portés
+    "duree_min_pct": 60,        # force, raquette, collectif : écart seulement sous 60 % de la durée prévue
     "recovery_h": 48,           # RecoveryTime chevauchant une séance qualité (rouge)
     "douleur": 4,               # douleur déclarée /10 (rouge)
 }
-FAMILLES_COURSE = {"course_outdoor", "course_tapis"}
-FAMILLES_DUREE_MINIMALE = {"muscu", "squash"}    # plus long que prévu : jamais un écart
+CATEGORIES_DUREE_MINIMALE = {"force", "raquette", "collectif"}    # plus long que prévu : jamais un écart
 ZONES_BAS_DU_CORPS = {"Achille G", "Achille D", "Fascia G", "Fascia D", "Mollet G", "Mollet D",
                       "Genou G", "Genou D", "Hanche"}
 
@@ -258,7 +259,9 @@ def evaluer_seance(realise: dict, prevu: Optional[dict], sante: Optional[dict] =
     z3_plus = pct.get("z3", 0) + pct.get("z4", 0) + pct.get("z5", 0)
     z45 = pct.get("z4", 0) + pct.get("z5", 0)
     type_prevu = (prevu or {}).get("type")
-    course = realise.get("famille") in FAMILLES_COURSE      # zones : course uniquement, jamais squash/muscu/vélo
+    sport = sports.sport(sports.sport_de(realise))
+    course = sport["zones_course"]                  # seuils de zones : sports de course uniquement
+    impact_eleve = sport["impact"] == "eleve"
 
     # ---- Orange : écarts au prévu ----
     if prevu and course and pct:
@@ -271,7 +274,7 @@ def evaluer_seance(realise: dict, prevu: Optional[dict], sante: Optional[dict] =
         if type_prevu == "intervals" and z45 < SEUILS["intervals_z45_min"]:
             signaux.append(Signal("intervals_non_atteints", "orange", round(z45, 1), SEUILS["intervals_z45_min"],
                                   f"seulement {z45:.0f} % en Z4-Z5 : séance qualité non atteinte"))
-    if prevu and realise.get("famille") in FAMILLES_DUREE_MINIMALE:
+    if prevu and sport["categorie"] in CATEGORIES_DUREE_MINIMALE:
         p, r = prevu.get("duree_min"), realise.get("duree_min")
         if p and r and r < p * SEUILS["duree_min_pct"] / 100:
             signaux.append(Signal("ecart_duree", "orange", round(r / p * 100), SEUILS["duree_min_pct"],
@@ -294,14 +297,21 @@ def evaluer_seance(realise: dict, prevu: Optional[dict], sante: Optional[dict] =
     elif douleur and niveau in ("vigilance", "blessure") and zone_douleur in zones_sante:
         signaux.append(Signal("douleur_zone", "rouge", douleur, 0,
                               f"douleur {douleur}/10 sur une zone en {niveau} ({zone_douleur})"))
-    if course and niveau == "blessure" and zones_sante & ZONES_BAS_DU_CORPS:
-        signaux.append(Signal("course_en_blessure", "rouge", 1, 0,
-                              "course réalisée en statut Blessure sur le bas du corps (" + ", ".join(sorted(zones_sante & ZONES_BAS_DU_CORPS)) + ")"))
+    if impact_eleve and niveau == "blessure" and zones_sante & ZONES_BAS_DU_CORPS:
+        quoi = "course" if sport["categorie"] == "course" else f"{sport['libelle'].lower()} (impact élevé)"
+        signaux.append(Signal("course_en_blessure" if sport["categorie"] == "course" else "impact_en_blessure", "rouge", 1, 0,
+                              f"{quoi} réalisée en statut Blessure sur le bas du corps ("
+                              + ", ".join(sorted(zones_sante & ZONES_BAS_DU_CORPS)) + ")"))
     rec_h = realise.get("recovery_time_h") or 0
     if rec_h > SEUILS["recovery_h"] and prochaine_qualite_dans_h is not None and prochaine_qualite_dans_h < rec_h:
         signaux.append(Signal("recovery", "rouge", rec_h, SEUILS["recovery_h"],
                               f"récupération {rec_h:.0f} h chevauchant la séance qualité dans {prochaine_qualite_dans_h:.0f} h"))
 
+    # Mobilité hors plan (yoga, étirements) : verdict neutre, jamais d'alerte ; signaux gardés pour info
+    if not prevu and sport["categorie"] == "mobilite":
+        for x in signaux:
+            x.niveau = "info"
+        return "hors_plan", signaux
     if any(x.niveau == "rouge" for x in signaux):
         return "rouge", signaux
     if not prevu:
