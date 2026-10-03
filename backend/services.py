@@ -2004,7 +2004,8 @@ def bilan_hebdo(imperatifs: dict) -> dict:
             imperatifs=imperatifs_llm,
             historique_4sem=historique,
             evenements=evenements, indicateurs=indicateurs, profil=_profil_llm(p),
-            statut_sante=statut, mode=p.get("mode_actif", "BASE"), phase_prepa=phase))
+            statut_sante=statut, mode=p.get("mode_actif", "BASE"), phase_prepa=phase,
+            bilan_semaine=bilan_semaine(lundi_prec)))
         analyse_id = _tracer("bilan_hebdo", reponse, erreur, trace, semaine_debut=lundi.isoformat())
         cout_total += trace["cout_usd"]
         if reponse is None:

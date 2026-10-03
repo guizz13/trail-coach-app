@@ -237,3 +237,35 @@ def test_bilan_semaine_sans_plan():
     faire("yoga", "2026-09-29T07:00", 30, 2)
     b = services.bilan_semaine(LUNDI)
     assert b["respect_global"] is None and b["par_categorie"]["mobilite"]["realise_seances"] == 1
+
+
+# ---- 4. Bilan du dimanche (LLM) ----------------------------------------------------------------------
+def test_bilan_hebdo_recoit_le_bilan_de_semaine(monkeypatch):
+    from test_llm import FauxLLM, SEMAINE_VIGILANCE, bilan
+    faux = FauxLLM(bilan_hebdo=bilan(SEMAINE_VIGILANCE))
+    monkeypatch.setattr(services, "_llm", faux)
+    x = semaine_du_28()
+    services.remplacer(x["bad"], [x["ef_sam"]])
+    services.bilan_hebdo({"semaine_debut": "2026-10-05", "ressenti": 7, "sommeil": 7, "sante": {"niveau": "100"}})
+    ctx = faux.appels[0][1]
+    b = ctx["bilan_semaine"]
+    assert b["lundi"] == "2026-09-28" and b["remplacements"][0]["par"] == "badminton 75 min"
+    assert b["decalages"][0]["seance"] == "Push"
+    assert ctx["indicateurs"]["seances_manquees"] == []            # décalée ou remplacée : pas manquée
+
+
+def test_prompt_section_10_2():
+    from pathlib import Path
+    prompt = (Path(__file__).parent.parent / "prompts" / "system_prompt_coach.md").read_text(encoding="utf-8")
+    debut, fin = prompt.index("### 10.2"), prompt.index("### 10.3")
+    assert "Tu reçois <bilan_semaine>" in prompt[debut:fin]
+    assert "Tu ne rattrapes jamais ce qui manque." in prompt[debut:fin]
+
+
+def test_client_llm_transmet_le_bilan(monkeypatch):
+    import llm_client
+    vu = {}
+    client = llm_client.CoachLLM.__new__(llm_client.CoachLLM)
+    monkeypatch.setattr(client, "_appel", lambda type_appel, ctx, *a: vu.update(ctx) or {}, raising=False)
+    client.bilan_hebdo([], [], {}, [], [], {}, {}, "100%", "BASE", None, bilan_semaine={"respect_global": "respectee"})
+    assert vu["bilan_semaine"] == {"respect_global": "respectee"}

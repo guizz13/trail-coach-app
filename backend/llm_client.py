@@ -120,10 +120,11 @@ class CoachLLM:
     def bilan_hebdo(self, semaine_ecoulee: list[dict], plan_prevu: list[dict],
                     imperatifs: dict, historique_4sem: list[dict], evenements: list[dict],
                     indicateurs: dict, profil: dict, statut_sante: str, mode: str,
-                    phase_prepa: dict | None) -> dict:
+                    phase_prepa: dict | None, bilan_semaine: dict | None = None) -> dict:
         ctx = {
             "semaine_ecoulee": semaine_ecoulee,
             "plan_prevu": plan_prevu,
+            "bilan_semaine": bilan_semaine,       # calculé par l'app : catégories, décalages, remplacements
             "imperatifs_semaine_suivante": imperatifs,
             "historique_4_semaines": historique_4sem,
             "evenements_a_venir": evenements,
