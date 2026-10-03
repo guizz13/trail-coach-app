@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 import db
 import extractor
 import metrics
+import sports
 
 TZ = ZoneInfo("Europe/Paris")
 
@@ -712,6 +713,25 @@ recalculer_verdicts = recalculer_tout      # nom historique de la route admin
 def _seance_publique(s: dict) -> dict:
     """Séance sans le JSON brut (volumineux et redondant)."""
     return {k: v for k, v in s.items() if k != "donnees_brutes"}
+
+
+# ---------------------------------------------------------------------------
+# Catalogue des sports
+# ---------------------------------------------------------------------------
+def sports_recents(n: int = 6) -> list[str]:
+    """Les n derniers sports utilisés (séances réalisées, plus récentes d'abord)."""
+    vus = []
+    for r in db.fetch_all("SELECT * FROM seances_realisees ORDER BY date_debut DESC LIMIT 200"):
+        sid = sports.sport_de(r)
+        if sid not in vus:
+            vus.append(sid)
+        if len(vus) == n:
+            break
+    return vus
+
+
+def catalogue_sports() -> dict:
+    return {**sports.catalogue_api(), "recents": sports_recents()}
 
 
 # ---------------------------------------------------------------------------

@@ -231,6 +231,11 @@ def _ou_404(x, quoi: str = "Ressource"):
 # ---------------------------------------------------------------------------
 # API — dashboard & profil
 # ---------------------------------------------------------------------------
+@app.get("/api/sports")
+def api_sports():
+    return services.catalogue_sports()
+
+
 @app.get("/api/dashboard")
 def api_dashboard():
     return services.tableau_de_bord()
