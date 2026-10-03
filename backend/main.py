@@ -321,6 +321,24 @@ def api_delier(id_: int):
     return services.delier(id_)
 
 
+@app.get("/api/seances_realisees/{id_}/remplacables")
+def api_remplacables(id_: int):
+    return services.remplacables(id_)
+
+
+@app.post("/api/seances_realisees/{id_}/remplacer")
+def api_remplacer(id_: int, corps: dict = Body(...)):
+    ids = corps.get("seance_planifiee_ids")
+    if not isinstance(ids, list) or not all(isinstance(i, int) for i in ids):
+        raise HTTPException(422, "seance_planifiee_ids (liste d'entiers) attendu.")
+    return services.remplacer(id_, ids)
+
+
+@app.post("/api/seances_realisees/{id_}/annuler_remplacement")
+def api_annuler_remplacement(id_: int):
+    return services.annuler_remplacement(id_)
+
+
 @app.post("/api/seances_realisees/{id_}/sport")
 def api_preciser_sport(id_: int, corps: dict = Body(...)):
     if not isinstance(corps.get("sport_id"), str):

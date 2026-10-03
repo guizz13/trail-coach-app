@@ -160,7 +160,9 @@ function rendrePlanning(jours, realisees, verdicts) {
       const decalee = r && r.date_debut.slice(0, 10) !== p.date_seance;
       const b = document.createElement("button");
       b.className = "seance";
+      const remplacante = p.remplacee_par ? parId[p.remplacee_par] : null;
       b.innerHTML = decalee ? seanceHTML(p, null, null, { statut: `Décalée à ${jourDe(r.date_debut.slice(0, 10))}` })
+        : remplacante ? seanceHTML(p, null, null, { statut: `Remplacée par ${sportInfo(remplacante.sport_id).libelle.toLowerCase()}` })
         : seanceHTML(p, r, r && verdicts[r.id]);
       b.onclick = () => editer(p, r);
       carte.appendChild(b);
@@ -172,7 +174,9 @@ function rendrePlanning(jours, realisees, verdicts) {
       const p = prevueDe[r.id];
       const b = document.createElement("button");
       b.className = "seance";
-      b.innerHTML = seanceHTML(null, r, verdicts[r.id], p ? { mention: `prévue ${jourDe(p.date_seance)}` } : {});
+      const mention = p ? `prévue ${jourDe(p.date_seance)}`
+        : (r.remplace || []).length ? `remplace ${r.remplace.map(libelleCourt).join(", ")}` : null;
+      b.innerHTML = seanceHTML(null, r, verdicts[r.id], mention ? { mention } : {});
       b.onclick = () => { location.href = `/historique#${r.id}`; };
       carte.appendChild(b);
     }

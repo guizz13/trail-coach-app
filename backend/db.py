@@ -377,6 +377,15 @@ def muscu_detail(seance_id: int) -> Optional[dict]:
 # ---------------------------------------------------------------------------
 # Séances planifiées
 # ---------------------------------------------------------------------------
+def remplacees_par(seance_id: int) -> list[dict]:
+    return fetch_all("SELECT p.* FROM remplacements r JOIN seances_planifiees p ON p.id = r.seance_planifiee_id "
+                     "WHERE r.seance_realisee_id = ? ORDER BY p.date_seance, p.id", (seance_id,))
+
+
+def remplacements_par_planifiee() -> dict[int, int]:
+    return {r["seance_planifiee_id"]: r["seance_realisee_id"] for r in fetch_all("SELECT * FROM remplacements")}
+
+
 def planifiees_remplacees() -> set[int]:
     return {r["seance_planifiee_id"] for r in fetch_all("SELECT seance_planifiee_id FROM remplacements")}
 

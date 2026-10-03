@@ -113,3 +113,69 @@ def test_migration_des_statuts(tmp_path, monkeypatch):
         fk = conn.execute("PRAGMA foreign_key_check").fetchall()
         sql = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'remplacements'").fetchone()[0]
     assert fk == [] and "REFERENCES seances_planifiees(" in sql
+
+
+# ---- 2. Remplacements ------------------------------------------------------------------------------
+def semaine_du_28():
+    """Cas réel de la section 0 : samedi EF + Push prévus, badminton samedi, EF + muscu dimanche."""
+    ids = {"ef_sam": prevoir("2026-10-03", "EF", "matin", 40), "push_sam": prevoir("2026-10-03", "muscu_push", "soir", 50),
+           "ef_dim": prevoir("2026-10-04", "EF", "matin", 40)}
+    ids["bad"] = faire("badminton", "2026-10-03T10:00", 75, 7)
+    ids["ef"] = faire("course_route", "2026-10-04T08:00", 40)
+    ids["push"] = faire("muscu", "2026-10-04T10:00", 55)
+    return ids
+
+
+def test_cas_reel_aucune_seance_manquee_apres_remplacement():
+    x = semaine_du_28()
+    assert [p["id"] for p in services.remplacables(x["bad"])] == [x["ef_sam"]]     # Push décalée, EF dim. faite
+    d = services.remplacer(x["bad"], [x["ef_sam"]])
+    assert [p["type"] for p in d["seance"]["remplace"]] == ["EF"]
+    assert statut(x["ef_sam"]) == "remplacee" and statut(x["push_sam"]) == "decale"
+    semaine = db.planifiees_entre("2026-09-28", "2026-10-04")
+    assert not [p for p in semaine if p["statut"] == "manque"]
+    jour = next(j for j in services.semaine(LUNDI) if j["date"] == "2026-10-03")
+    assert next(p for p in jour["planifiees"] if p["id"] == x["ef_sam"])["remplacee_par"] == x["bad"]
+
+
+def test_remplacement_conserve_par_le_recalcul_admin():
+    x = semaine_du_28()
+    services.remplacer(x["bad"], [x["ef_sam"]])
+    services.recalculer_tout()
+    assert statut(x["ef_sam"]) == "remplacee" and lie_a(x["ef_sam"]) is None
+    assert db.planifiees_remplacees() == {x["ef_sam"]}
+
+
+def test_annuler_le_remplacement():
+    x = semaine_du_28()
+    services.remplacer(x["bad"], [x["ef_sam"]])
+    d = services.annuler_remplacement(x["bad"])
+    assert d["seance"]["remplace"] == [] and statut(x["ef_sam"]) == "manque"
+
+
+def test_remplacement_refuse():
+    x = semaine_du_28()
+    with pytest.raises(ValueError, match="liée"):
+        services.remplacer(x["push"], [x["ef_sam"]])                 # la muscu est liée (décalée)
+    with pytest.raises(ValueError, match="non remplaçable"):
+        services.remplacer(x["bad"], [x["ef_dim"]])                  # déjà faite
+    autre = prevoir("2026-10-05", "EF")
+    with pytest.raises(ValueError, match="non remplaçable"):
+        services.remplacer(x["bad"], [autre])                        # autre semaine
+
+
+def test_seance_remplacee_jamais_liee():
+    ef = prevoir("2026-10-01", "EF")
+    bad = faire("badminton", "2026-10-01T10:00")
+    services.remplacer(bad, [ef])
+    faire("course_route", "2026-10-02T08:00")                        # report possible (+1 j) … mais remplacée
+    assert lie_a(ef) is None and statut(ef) == "remplacee"
+
+
+def test_suppression_en_cascade():
+    ef = prevoir("2026-10-01", "EF")
+    bad = faire("badminton", "2026-10-01T10:00")
+    services.remplacer(bad, [ef])
+    with db.connexion() as c:
+        c.execute("DELETE FROM seances_realisees WHERE id = ?", (bad,))
+    assert db.planifiees_remplacees() == set()

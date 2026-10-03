@@ -268,9 +268,33 @@ function rendreLiaison(d, x) {
     $("[data-delier]", el).onclick = () => apres(api("POST", `/api/seances_realisees/${id}/delier`));
     return;
   }
+  const remplace = x.seance.remplace || [];
+  if (remplace.length) {
+    el.innerHTML = `<div class="liaison"><span>Remplace : <b>${esc(remplace.map(libelleCourt).join(", "))}</b></span>
+      <button type="button" class="btn petit" data-annuler>Annuler le remplacement</button></div><div class="liaison-erreur"></div>`;
+    $("[data-annuler]", el).onclick = () => apres(api("POST", `/api/seances_realisees/${id}/annuler_remplacement`));
+    return;
+  }
   el.innerHTML = `<div class="liaison"><span class="secondaire">Hors plan</span>
     <button type="button" class="btn petit" data-lier>Lier à une séance prévue</button></div>
+    <button type="button" class="btn petit" data-remplacer style="margin-top:6px"><i class="ti ti-switch-horizontal"></i>Remplace une séance prévue</button>
     <div class="liaison-choix"></div><div class="liaison-erreur"></div>`;
+  // Remplacement : toutes catégories, plusieurs séances possibles (badminton au lieu d'EF + Push)
+  $("[data-remplacer]", el).onclick = async () => {
+    const zone = $(".liaison-choix", el);
+    try {
+      const c = await api("GET", `/api/seances_realisees/${id}/remplacables`);
+      if (!c.length) { zone.innerHTML = `<div class="vide">Aucune séance prévue à remplacer cette semaine.</div>`; return; }
+      zone.innerHTML = c.map(p => `<label class="coche" style="padding:8px 0"><input type="checkbox" value="${p.id}">
+          ${esc(libellePrevu(p))}${p.duree_min ? ` · ${esc(duree(p.duree_min))}` : ""}</label>`).join("")
+        + `<button type="button" class="btn principal petit" data-valider-remplacement style="margin-top:6px">Valider</button>`;
+      $("[data-valider-remplacement]", zone).onclick = () => {
+        const ids = $$("input:checked", zone).map(i => Number(i.value));
+        if (!ids.length) return;
+        apres(api("POST", `/api/seances_realisees/${id}/remplacer`, { seance_planifiee_ids: ids }));
+      };
+    } catch (e) { erreurSimple(zone, e); }
+  };
   $("[data-lier]", el).onclick = async () => {
     const zone = $(".liaison-choix", el);
     try {

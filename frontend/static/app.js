@@ -90,6 +90,8 @@ function titreRealisee(r) {
   const sport = sportInfo(r.sport_id);
   return sport.categorie === "course" && r.sous_type && r.sous_type !== "inconnu" ? libelleType(r.sous_type) : sport.libelle;
 }
+// « EF 40 min » : séance prévue remplacée, libellé court
+const libelleCourt = p => [libelleType(p.type), p.duree_min ? `${p.duree_min} min` : ""].filter(Boolean).join(" ");
 const pastillePreciser = r => r && r.sport_a_preciser
   ? `<span role="button" tabindex="0" class="badge orange" data-preciser-id="${r.id}">Sport à préciser</span>` : "";
 function libelleMode(profil, prochainA) {

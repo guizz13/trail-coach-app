@@ -619,6 +619,44 @@ def delier(seance_id: int) -> dict:
     return detail_seance(seance_id)
 
 
+# ---------------------------------------------------------------------------
+# Remplacement manuel : une séance réalisée remplace une ou plusieurs séances prévues
+# (badminton au lieu d'EF + muscu). Décision manuelle, conservée par le recalcul admin.
+# ---------------------------------------------------------------------------
+def remplacables(seance_id: int) -> list[dict]:
+    """Séances prévues de la semaine, toutes catégories, ni faites, ni décalées, ni déjà remplacées."""
+    s = _seance_ou_erreur(seance_id)
+    lundi = lundi_de(date_de(s["date_debut"]))
+    deja = db.planifiees_remplacees()
+    return [p for p in db.planifiees_entre(lundi.isoformat(), (lundi + timedelta(days=6)).isoformat())
+            if p["seance_realisee_id"] is None and p["id"] not in deja and p["type"] != "repos"]
+
+
+def remplacer(seance_id: int, planifiee_ids: list[int]) -> dict:
+    s = _seance_ou_erreur(seance_id)
+    if prevu_de(seance_id):
+        raise ValueError("Cette séance est liée à une séance prévue : délie-la d'abord.")
+    if not planifiee_ids:
+        raise ValueError("Choisir au moins une séance prévue.")
+    possibles = {p["id"] for p in remplacables(seance_id)}
+    if not set(planifiee_ids) <= possibles:
+        raise ValueError("Séance prévue non remplaçable : déjà faite, déjà remplacée ou hors de la semaine.")
+    with db.connexion() as c:
+        for pid in planifiee_ids:
+            c.execute("INSERT OR IGNORE INTO remplacements (seance_realisee_id, seance_planifiee_id) VALUES (?, ?)",
+                      (seance_id, pid))
+    recalculer_semaine(lundi_de(date_de(s["date_debut"])))
+    return detail_seance(seance_id)
+
+
+def annuler_remplacement(seance_id: int) -> dict:
+    s = _seance_ou_erreur(seance_id)
+    with db.connexion() as c:
+        c.execute("DELETE FROM remplacements WHERE seance_realisee_id = ?", (seance_id,))
+    recalculer_semaine(lundi_de(date_de(s["date_debut"])))
+    return detail_seance(seance_id)
+
+
 def _datetime_planifiee(p: dict) -> datetime:
     d = date.fromisoformat(p["date_seance"])
     return datetime(d.year, d.month, d.day, HEURE_CRENEAU.get(p["creneau"], 9), tzinfo=TZ)
@@ -1018,6 +1056,8 @@ def _seance_publique(s: dict) -> dict:
     out = {k: v for k, v in s.items() if k != "donnees_brutes"}
     if s.get("decalage_jours"):
         out["prevue_le"] = (date_de(s["date_debut"]) - timedelta(days=s["decalage_jours"])).isoformat()
+    if s.get("id"):
+        out["remplace"] = [{k: p[k] for k in ("id", "type", "date_seance", "duree_min")} for p in db.remplacees_par(s["id"])]
     return out
 
 
@@ -1058,7 +1098,9 @@ def marquer_manquees(avant: date) -> None:
 def semaine(lundi: date) -> list[dict]:
     """7 jours avec séances planifiées et réalisées."""
     dimanche = lundi + timedelta(days=6)
-    plan = db.planifiees_entre(lundi.isoformat(), dimanche.isoformat())
+    remplacees = db.remplacements_par_planifiee()
+    plan = [{**p, "remplacee_par": remplacees.get(p["id"])}
+            for p in db.planifiees_entre(lundi.isoformat(), dimanche.isoformat())]
     faites = [_seance_publique(s) for s in db.seances_entre(lundi.isoformat(), dimanche.isoformat())]
     liees = {p["seance_realisee_id"] for p in plan if p["seance_realisee_id"]}
     jours = []
@@ -1242,7 +1284,7 @@ def valider_ajustement(reponse: dict, lundi: date, premier: date) -> list[str]:
             sources = [(x.get("type"), x.get("duree_min")) for x in proposes[d.isoformat()]]
         else:
             sources = [(p["type"], p["duree_min"]) for p in db.planifiees_entre(d.isoformat(), d.isoformat())
-                       if p["seance_realisee_id"] is None and p["statut"] != "manque"]
+                       if p["seance_realisee_id"] is None and p["statut"] not in ("manque", "remplacee")]
         jour += [(categorie_planifiee(t), m, "plan", sport_planifie(t)) for t, m in sources if categorie_planifiee(t)]
         activites[d] = jour
     if all(activites[d] for d in activites):
