@@ -11,7 +11,7 @@ import services
 
 def base_prod(dossier):
     """Base au format de main (production avant v5) avec des séances de chaque cas."""
-    schema = subprocess.run(["git", "show", "main:backend/schema.sql"], capture_output=True, text=True, check=True).stdout
+    schema = subprocess.run(["git", "show", "31f6211:backend/schema.sql"], capture_output=True, text=True, check=True).stdout
     c = sqlite3.connect(dossier / "coach.db")
     c.executescript(schema)
     lignes = [  # id, hash, code, famille, km, D+

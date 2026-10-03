@@ -94,7 +94,7 @@ def test_recalcul_admin_conserve_le_report():
 
 
 def test_migration_des_statuts(tmp_path, monkeypatch):
-    schema = subprocess.run(["git", "show", "main:backend/schema.sql"], capture_output=True, text=True, check=True).stdout
+    schema = subprocess.run(["git", "show", "31f6211:backend/schema.sql"], capture_output=True, text=True, check=True).stdout
     dossier = tmp_path / "prod"
     dossier.mkdir()
     c = sqlite3.connect(dossier / "coach.db")

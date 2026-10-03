@@ -29,7 +29,7 @@ def test_enregistrer_sante_et_texte_llm():
 
 
 def test_migration_du_texte_libre(tmp_path, monkeypatch):
-    ancien = subprocess.run(["git", "show", "main:backend/schema.sql"], capture_output=True, text=True).stdout
+    ancien = subprocess.run(["git", "show", "31f6211:backend/schema.sql"], capture_output=True, text=True).stdout
     tmp_path = tmp_path / "ancienne_base"          # base distincte de celle créée par la fixture
     tmp_path.mkdir()
     c = sqlite3.connect(tmp_path / "coach.db")
