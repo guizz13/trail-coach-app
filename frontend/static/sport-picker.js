@@ -17,13 +17,30 @@ const iconeSport = id => { const s = sportInfo(id); return `<span class="disc ${
 // Recherche insensible à la casse et aux accents
 const sansAccents = t => (t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
+// Pastille « Sport à préciser » (cartes de séance) : choix du sport, puis analyse suspendue relancée
+document.addEventListener("click", async e => {
+  const b = e.target.closest("[data-preciser-id]");
+  if (!b) return;
+  e.preventDefault();
+  e.stopPropagation();                 // la carte elle-même ouvre le détail
+  const id = await choisirSport({ sousTitre: "Mémorisé pour les prochains fichiers avec ce code." });
+  if (!id) return;
+  b.textContent = "Analyse…";
+  try {
+    await api("POST", `/api/seances_realisees/${b.dataset.preciserId}/sport`, { sport_id: id });
+    location.reload();
+  } catch (err) { b.textContent = "Sport à préciser"; alert(err.message); }
+}, true);
+
 // Ouvre la feuille et résout avec l'id choisi (null si fermée sans choix).
 // opts : { titre, sousTitre, propose (sport_id), categorie (catégorie proposée sans sport précis) }
 async function choisirSport(opts = {}) {
   const cat = await CATALOGUE_PRET;
   if (!cat) return null;
   return new Promise(resoudre => {
-    let choisi = null;
+    // Résolution immédiate au choix : l'événement close peut être différé (onglet en arrière-plan)
+    let fini = false;
+    const terminer = v => { if (!fini) { fini = true; resoudre(v); } };
     const d = feuille(`<h2>${esc(opts.titre || "Quel sport ?")}</h2>
       ${opts.sousTitre ? `<p class="secondaire" style="margin:0 0 10px">${esc(opts.sousTitre)}</p>` : ""}
       <input type="search" class="picker-recherche" placeholder="Rechercher un sport" autocomplete="off">
@@ -55,10 +72,10 @@ async function choisirSport(opts = {}) {
     liste.addEventListener("click", e => {
       const b = e.target.closest("[data-id]");
       if (!b) return;
-      choisi = b.dataset.id;
+      terminer(b.dataset.id);
       d.close();
     });
-    d.addEventListener("close", () => resoudre(choisi), { once: true });
+    d.addEventListener("close", () => terminer(null), { once: true });
   });
 }
 
@@ -74,7 +91,8 @@ async function feuilleSeanceManuelle(opts = {}) {
   let sportId = (CATALOGUE?.recents || [])[0] || null;
 
   return new Promise(resoudre => {
-    let resultat = null;
+    let fini = false;
+    const terminer = v => { if (!fini) { fini = true; resoudre(v); } };
     const d = feuille(`<h2>Séance réalisée</h2>
       <form id="saisie">
         <label>Sport</label>
@@ -126,7 +144,8 @@ async function feuilleSeanceManuelle(opts = {}) {
       bouton.disabled = true;
       bouton.textContent = corps.analyser ? "Analyse en cours…" : "Enregistrement…";
       try {
-        resultat = await api("POST", "/api/seances_realisees", corps);
+        const resultat = await api("POST", "/api/seances_realisees", corps);
+        terminer(resultat);
         d.close();
       } catch (err) {
         bouton.disabled = false;
@@ -134,6 +153,6 @@ async function feuilleSeanceManuelle(opts = {}) {
         erreurSimple($("[data-erreur]", form), err);
       }
     };
-    d.addEventListener("close", () => resoudre(resultat), { once: true });
+    d.addEventListener("close", () => terminer(null), { once: true });
   });
 }

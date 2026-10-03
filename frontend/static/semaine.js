@@ -10,7 +10,7 @@ let objectifs = null;       // /api/evenements (événements à venir + plan de 
 
 async function charger(lundi) {
   try {
-    if (!tableau) [tableau, graphiques, objectifs] = await Promise.all([api("GET", "/api/dashboard"), api("GET", "/api/graphiques"), api("GET", "/api/evenements")]);
+    if (!tableau) [tableau, graphiques, objectifs] = await Promise.all([api("GET", "/api/dashboard"), api("GET", "/api/graphiques"), api("GET", "/api/evenements"), CATALOGUE_PRET]);
     lundiAffiche = lundi || tableau.lundi;
     const courante = lundiAffiche === tableau.lundi;
     const dimanche = ajouterJours(lundiAffiche, 6);
@@ -121,7 +121,7 @@ function rendreForme(courante, realisees, dimanche) {
   let dist = courante ? tableau.distribution : null;
   if (!courante) {
     const tot = { z1: 0, z2: 0, z3: 0, z4: 0, z5: 0 };
-    realisees.filter(s => disciplineFamille(s.famille) === "course")
+    realisees.filter(s => sportInfo(s.sport_id).categorie === "course")
       .forEach(s => Object.entries(s.temps_zones_s || {}).forEach(([z, v]) => { tot[z] = (tot[z] || 0) + v; }));
     const t = Object.values(tot).reduce((a, b) => a + b, 0);
     if (t) dist = { z1_z2: 100 * (tot.z1 + tot.z2) / t, z3: 100 * tot.z3 / t, z4_z5: 100 * (tot.z4 + tot.z5) / t };
@@ -132,7 +132,7 @@ function rendreForme(courante, realisees, dimanche) {
 }
 
 function rendreVolume(courante, realisees) {
-  const km = realisees.filter(s => disciplineFamille(s.famille) === "course").reduce((a, s) => a + (s.distance_km || 0), 0);
+  const km = realisees.filter(s => sportInfo(s.sport_id).categorie === "course").reduce((a, s) => a + (s.distance_km || 0), 0);
   $("#km-semaine").innerHTML = `<b style="color:var(--text-primary)">${nb(km, 1)} km</b> ${courante ? "cette sem." : "cette semaine-là"}`;
   const sem = graphiques.semaines;
   graphCourbe($("#g-volume"), sem.map(s => ({ valeur: s.km, detail: `semaine du ${dateFR(s.lundi, { day: "numeric", month: "short" })} · ${nb(s.dplus)} m D+` })),
@@ -186,6 +186,7 @@ function editer(p, realisee) {
     return;
   }
   const types = TYPES_PLANIFIABLES.includes(p.type) ? TYPES_PLANIFIABLES : [p.type, ...TYPES_PLANIFIABLES];
+  const optTypes = v => types.map(x => `<option value="${esc(x)}" ${x === v ? "selected" : ""}>${esc(libelleType(x))}</option>`).join("");
   const opt = (liste, v, lib = {}) => liste.map(x => `<option value="${esc(x)}" ${x === v ? "selected" : ""}>${esc(lib[x] || x)}</option>`).join("");
   const d = feuille(`<h2>${p.id ? "Modifier la séance" : "Nouvelle séance"}</h2>
     ${p.version ? `<div class="sous-texte">version ${p.version} · ${esc(p.origine || "")} · ${esc(STATUTS[p.statut] || p.statut)}</div>` : ""}
@@ -195,7 +196,9 @@ function editer(p, realisee) {
         <div><label>Date</label><input type="date" name="date_seance" value="${esc(p.date_seance)}" min="${tableau.lundi}" max="${ajouterJours(tableau.lundi, 6)}" required></div>
         <div><label>Créneau</label><select name="creneau">${opt(Object.keys(CRENEAUX), p.creneau || "matin", CRENEAUX)}</select></div>
       </div>
-      <label>Type</label><select name="type">${opt(types, p.type || "EF", TYPES)}</select>
+      <label>Type</label>
+      <div class="ligne"><select name="type" style="flex:1">${optTypes(p.type || "EF")}</select>
+        <button type="button" class="btn petit" data-autre-sport><i class="ti ti-search"></i>Sport</button></div>
       <div class="champs-2">
         <div><label>Durée (min)</label><input type="number" inputmode="numeric" name="duree_min" value="${esc(p.duree_min ?? "")}"></div>
         <div><label>Distance (km)</label><input type="number" inputmode="decimal" step="0.1" name="distance_km" value="${esc(p.distance_km ?? "")}"></div>
@@ -206,6 +209,14 @@ function editer(p, realisee) {
       <div class="boutons">${p.id ? `<button type="button" class="btn danger" data-suppr>Supprimer</button>` : ""}
         <button type="submit" class="btn principal">Enregistrer</button></div>
     </form>`);
+  // Tout sport du catalogue se planifie (badminton, natation…) : le type devient l'id du sport
+  $("[data-autre-sport]", d).onclick = async () => {
+    const id = await choisirSport({ titre: "Sport prévu" });
+    if (!id) return;
+    const select = $("[name=type]", d);
+    if (![...select.options].some(o => o.value === id)) select.insertAdjacentHTML("afterbegin", `<option value="${esc(id)}">${esc(libelleType(id))}</option>`);
+    select.value = id;
+  };
   $("form", d).onsubmit = async e => {
     e.preventDefault();
     const v = Object.fromEntries(new FormData(e.target));

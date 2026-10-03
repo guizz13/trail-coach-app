@@ -6,7 +6,7 @@ coque(`<div class="segments" id="periode">${Object.entries(PERIODES).map(([v, l]
 
 const aujourdhui = isoJour(new Date());
 let semaines = Number(stockage.lire("periode")) || 12;
-let famille = "";
+let categorie = "";          // filtre de la liste : une catégorie du catalogue, ou toutes
 let graphiques = null;
 let seances = [];
 const PAGE = 25;
@@ -16,17 +16,18 @@ function debutPeriode() { return ajouterJours(lundiDe(aujourdhui), -7 * (semaine
 
 async function charger() {
   $$("#periode button").forEach(b => b.classList.toggle("actif", Number(b.dataset.v) === semaines));
-  if (!graphiques) graphiques = await api("GET", "/api/graphiques");
+  if (!graphiques) [graphiques] = await Promise.all([api("GET", "/api/graphiques"), CATALOGUE_PRET]);
   seances = await api("GET", `/api/seances?du=${debutPeriode()}`);
   rendreVolume(); rendreCharge(); rendrePoids();
   affichees = PAGE;
+  rendreFiltres();
   rendreListe();
 }
 
 // ---- Volume : agrégé par semaine depuis les séances de la période --------------------
 function rendreVolume() {
   const lundis = Array.from({ length: semaines }, (_, i) => ajouterJours(debutPeriode(), 7 * i));
-  const course = seances.filter(s => disciplineFamille(s.famille) === "course");
+  const course = seances.filter(s => sportInfo(s.sport_id).categorie === "course");
   const pts = lundis.map(l => {
     const sem = course.filter(s => lundiDe(s.date_debut.slice(0, 10)) === l);
     return { valeur: Math.round(sem.reduce((a, s) => a + (s.distance_km || 0), 0) * 10) / 10,
@@ -106,9 +107,21 @@ async function chargerMuscu() {
 }
 
 // ---- Liste des séances ------------------------------------------------------------------------
+// Filtres : « Tous » puis une puce par catégorie présente sur la période
+function rendreFiltres() {
+  const presentes = new Set(seances.map(s => sportInfo(s.sport_id).categorie));
+  if (categorie && !presentes.has(categorie)) categorie = "";
+  const ordre = Object.keys(CATALOGUE?.categories || {}).filter(c => presentes.has(c));
+  $("#categories").innerHTML = [["", "Tous"], ...ordre.map(c => [c, libelleCategorie(c)])]
+    .map(([v, l]) => `<button type="button" data-v="${esc(v)}" class="${v === categorie ? "actif" : ""}">${esc(l)}</button>`).join("");
+  $$("#categories button").forEach(b => {
+    b.onclick = () => { categorie = b.dataset.v; affichees = PAGE; rendreFiltres(); rendreListe(); };
+  });
+}
+
 async function rendreListe() {
   // L'API renvoie déjà les séances de la plus récente à la plus ancienne
-  const liste = seances.filter(s => !famille || disciplineFamille(s.famille) === famille);
+  const liste = seances.filter(s => !categorie || sportInfo(s.sport_id).categorie === categorie);
   const el = $("#liste");
   if (!liste.length) { el.innerHTML = `<div class="vide" style="padding:10px 0">Aucune séance sur la période.</div>`; return; }
   const visibles = liste.slice(0, affichees);
@@ -116,11 +129,10 @@ async function rendreListe() {
   for (const s of visibles) {
     const b = document.createElement("button");
     b.className = "liste-ligne";
-    const titre = s.sous_type && s.sous_type !== "inconnu" ? libelleType(s.sous_type) : FAMILLES[s.famille] || s.famille;
-    b.innerHTML = `${iconeDisc(disciplineFamille(s.famille))}
-      <div class="seance-corps"><div class="seance-type">${esc(titre)}</div>
-        <div class="seance-detail">${esc(dateFR(s.date_debut, { weekday: "short", day: "numeric", month: "short" }))} · ${esc(duree(s.duree_min))}${s.distance_km ? " · " + nb(s.distance_km, 1, "km") : ""}</div></div>
-      <div class="seance-droite">${verdictHTML(s.verdict)}<i class="ti ti-chevron-right muted"></i></div>`;
+    b.innerHTML = `${iconeSport(s.sport_id)}
+      <div class="seance-corps"><div class="seance-type">${esc(titreRealisee(s))}</div>
+        <div class="seance-detail">${esc(dateFR(s.date_debut, { weekday: "short", day: "numeric", month: "short" }))} · ${esc(duree(s.duree_min))}${s.distance_km ? " · " + nb(s.distance_km, 1, "km") : ""}${s.source === "manuel" ? " · saisie" : ""}</div></div>
+      <div class="seance-droite">${verdictHTML(s.verdict)}${pastillePreciser(s)}<i class="ti ti-chevron-right muted"></i></div>`;
     b.onclick = () => ouvrir(s.id);
     el.appendChild(b);
   }
@@ -134,13 +146,6 @@ async function rendreListe() {
   }
 }
 
-$$("#familles button").forEach(b => {
-  b.onclick = () => {
-    famille = b.dataset.v; affichees = PAGE;
-    $$("#familles button").forEach(x => x.classList.toggle("actif", x === b));
-    rendreListe();
-  };
-});
 $$("#periode button").forEach(b => {
   b.onclick = () => { semaines = Number(b.dataset.v); stockage.ecrire("periode", semaines); charger(); };
 });
@@ -150,12 +155,13 @@ async function ouvrir(id) {
   const d = feuille(`<div class="reflexion"><span class="spinner"></span>Chargement…</div>`);
   try {
     const x = await api("GET", `/api/seances/${id}`);
-    const s = x.seance, m = x.muscu_detail, disc = disciplineFamille(s.famille);
+    const s = x.seance, m = x.muscu_detail, sport = sportInfo(s.sport_id);
     const trace = s.a_gps ? stockage.lire("trace:" + s.fichier_hash) : null;
-    const titre = s.sous_type && s.sous_type !== "inconnu" ? `${FAMILLES[s.famille]} · ${libelleType(s.sous_type)}` : FAMILLES[s.famille] || s.famille;
+    const titre = s.sport_a_preciser ? "Sport à préciser"
+      : sport.categorie === "course" && s.sous_type && s.sous_type !== "inconnu" ? `${sport.libelle} · ${libelleType(s.sous_type)}` : sport.libelle;
     const st = (v, l) => `<div><b>${v}</b>${l}</div>`;
     d.innerHTML = `<div class="poignee"></div>
-      <div class="seance" style="cursor:default">${iconeDisc(disc)}
+      <div class="seance" style="cursor:default">${iconeSport(s.sport_id)}
         <div class="seance-corps"><h2>${esc(titre)}</h2>
           <div class="sous-texte">${esc(dateFR(s.date_debut, { weekday: "long", day: "numeric", month: "long", year: "numeric" }))} · ${esc(heure(s.date_debut))}</div></div>
         ${trace ? svgTrace(trace, 80, 56) : ""}</div>
@@ -165,6 +171,7 @@ async function ouvrir(id) {
         ${s.dplus_m ? st(nb(s.dplus_m, 0, "m"), "D+") : ""}
         ${st(s.fc_moy ? `${s.fc_moy}/${s.fc_max}` : "—", "FC moy/max")}
         ${st(nb(s.charge), "charge de la séance")}
+        ${s.rpe ? st(`${s.rpe}/10`, "effort ressenti") : ""}
         ${s.epoc ? st(nb(s.epoc), "EPOC") : ""}
         ${st(s.recovery_time_h ? nb(s.recovery_time_h, 0, "h") : "—", "récupération estimée")}
         ${s.peak_training_effect ? st(nb(s.peak_training_effect, 1), "effet d'entraînement") : ""}
@@ -172,6 +179,8 @@ async function ouvrir(id) {
         ${s.energie_kcal ? st(nb(s.energie_kcal), "kcal") : ""}
       </div>
       ${s.a_fc ? barreZones(zonesDepuisPct(s.temps_zones_pct)) : ""}
+      ${s.note ? `<p class="secondaire" style="margin:8px 0 0">${esc(s.note)}</p>` : ""}
+      ${s.sport_a_preciser ? `<div style="margin-top:8px">${pastillePreciser(s)}</div>` : ""}
       <div id="liaison"></div>
       ${m ? `<div class="section-label">Musculation${m.split ? " · " + esc(SPLITS[m.split] || m.split) : ""}</div>
         <div class="badges">${(m.groupes || []).map(g => `<span class="badge">${esc(GROUPES[g] || g)}</span>`).join("")}</div>

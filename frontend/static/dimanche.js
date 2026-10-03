@@ -62,7 +62,7 @@ function lireImperatifs() {
 }
 
 async function init() {
-  const d = await api("GET", "/api/dimanche");
+  const [d] = await Promise.all([api("GET", "/api/dimanche"), CATALOGUE_PRET]);
   form.semaine_debut.value = d.semaine_debut;
   const p = d.profil;
   (p.sante_zones || []).forEach(z => zonesChoisies.add(z));
@@ -177,7 +177,9 @@ function editer(k) {
         <div><label>Jour</label><select name="jour">${opt(JOURS, s.jour)}</select></div>
         <div><label>Créneau</label><select name="creneau">${opt(Object.keys(CRENEAUX), s.creneau, CRENEAUX)}</select></div>
       </div>
-      <label>Type</label><select name="type">${opt(types, s.type, TYPES)}</select>
+      <label>Type</label>
+      <div class="ligne"><select name="type" style="flex:1">${types.map(x => `<option value="${esc(x)}" ${x === s.type ? "selected" : ""}>${esc(libelleType(x))}</option>`).join("")}</select>
+        <button type="button" class="btn petit" data-autre-sport><i class="ti ti-search"></i>Sport</button></div>
       <div class="champs-2">
         <div><label>Durée (min)</label><input type="number" inputmode="numeric" name="duree_min" value="${esc(s.duree_min ?? "")}"></div>
         <div><label>Intensité</label><input name="intensite" value="${esc(s.intensite || "")}"></div>
@@ -186,6 +188,13 @@ function editer(k) {
       <div class="boutons">${k == null ? "" : `<button type="button" class="btn danger" data-suppr>Retirer</button>`}
         <button type="submit" class="btn principal">OK</button></div>
     </form>`);
+  $("[data-autre-sport]", d).onclick = async () => {
+    const id = await choisirSport({ titre: "Sport prévu" });
+    if (!id) return;
+    const select = $("[name=type]", d);
+    if (![...select.options].some(o => o.value === id)) select.insertAdjacentHTML("afterbegin", `<option value="${esc(id)}">${esc(libelleType(id))}</option>`);
+    select.value = id;
+  };
   $("form", d).onsubmit = e => {
     e.preventDefault();
     const v = Object.fromEntries(new FormData(e.target));

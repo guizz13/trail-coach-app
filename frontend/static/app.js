@@ -81,7 +81,17 @@ function feuilleSante(s) {
 const GROUPES = { pectoraux: "Pectoraux", triceps: "Triceps", epaules: "Épaules", dos: "Dos", biceps: "Biceps",
   cuisses: "Cuisses", ischios: "Ischios", mollets: "Mollets", abdos: "Abdos" };
 
-const libelleType = t => TYPES[t] || t;
+// Type prévu : type de séance connu, sinon sport du catalogue (« badminton »), sinon texte libre
+const libelleType = t => TYPES[t] || (typeof CATALOGUE !== "undefined" && CATALOGUE?.parId[t]?.libelle) || t;
+const estSport = t => typeof CATALOGUE !== "undefined" && !!CATALOGUE?.parId[t];
+// Séance réalisée : sous-type de course s'il est connu, sinon le sport
+function titreRealisee(r) {
+  if (r.sport_a_preciser) return "Sport à préciser";
+  const sport = sportInfo(r.sport_id);
+  return sport.categorie === "course" && r.sous_type && r.sous_type !== "inconnu" ? libelleType(r.sous_type) : sport.libelle;
+}
+const pastillePreciser = r => r && r.sport_a_preciser
+  ? `<span role="button" tabindex="0" class="badge orange" data-preciser-id="${r.id}">Sport à préciser</span>` : "";
 function libelleMode(profil, prochainA) {
   if (profil.mode_actif !== "RACE_PREP") return "Entraînement libre";
   return prochainA ? `Prépa ${prochainA.titre}` : "Prépa course";
@@ -455,18 +465,18 @@ function graphCourbe(conteneur, points, opts = {}) {
 // ---------------------------------------------------------------------------
 // p : séance planifiée ; r : séance réalisée liée (facultative) ; verdict facultatif
 function seanceHTML(p, r, verdict) {
-  const disc = r ? disciplineFamille(r.famille) : disciplineType(p.type);
-  const titre = p ? libelleType(p.type) : (r.sous_type ? libelleType(r.sous_type) : FAMILLES[r.famille] || r.famille);
+  const icone = r ? iconeSport(r.sport_id) : estSport(p.type) ? iconeSport(p.type) : iconeDisc(disciplineType(p.type));
+  const titre = p ? libelleType(p.type) : titreRealisee(r);
   const trace = r && r.a_gps ? stockage.lire("trace:" + r.fichier_hash) : null;
   const stats = r ? [r.distance_km ? nb(r.distance_km, 1, "km") : duree(r.duree_min), r.dplus_m ? nb(r.dplus_m, 0, "m D+") : "",
     r.fc_moy ? `${r.fc_moy} bpm` : ""].filter(Boolean).join(" · ") : "";
   const detail = p ? [p.creneau && CRENEAUX[p.creneau], p.duree_min && duree(p.duree_min), p.distance_km && nb(p.distance_km, 1, "km"), p.detail].filter(Boolean).join(" · ")
     : `${heure(r.date_debut)} · hors plan`;
   const statut = p ? p.statut : "realise";
-  return `${iconeDisc(disc)}
+  return `${icone}
     <div class="seance-corps"><div class="seance-type">${esc(titre)}</div>
       <div class="seance-detail">${esc(detail)}</div>
       ${stats ? `<div class="seance-stats">${esc(stats)}</div>` : ""}</div>
     ${trace ? svgTrace(trace, 50, 35) : ""}
-    <div class="seance-droite">${p && p.type === "repos" ? "" : `<span class="statut ${statut}">${STATUTS[statut]}</span>`}${verdictHTML(verdict)}</div>`;
+    <div class="seance-droite">${p && p.type === "repos" ? "" : `<span class="statut ${statut}">${STATUTS[statut]}</span>`}${verdictHTML(verdict)}${pastillePreciser(r)}</div>`;
 }
