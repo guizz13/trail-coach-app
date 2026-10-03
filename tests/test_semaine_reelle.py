@@ -179,3 +179,61 @@ def test_suppression_en_cascade():
     with db.connexion() as c:
         c.execute("DELETE FROM seances_realisees WHERE id = ?", (bad,))
     assert db.planifiees_remplacees() == set()
+
+
+# ---- 3. Bilan de la semaine par catégorie -------------------------------------------------------------
+def test_bilan_semaine_cas_reel():
+    x = semaine_du_28()
+    # Reste de la semaine, fait comme prévu
+    for jour, type_, sport, duree, rpe in (("2026-09-28", "muscu_pull", "muscu", 50, 4), ("2026-09-29", "velo", "velo_salle", 60, 4),
+                                           ("2026-09-30", "squash", "squash", 60, 5), ("2026-10-01", "EF", "course_route", 45, 4)):
+        prevoir(jour, type_, "soir", duree)
+        faire(sport, f"{jour}T18:00", duree, rpe)
+    services.remplacer(x["bad"], [x["ef_sam"]])
+    b = services.bilan_semaine(LUNDI)
+    assert b["par_categorie"]["course"] == {"prevu_seances": 3, "realise_seances": 2, "prevu_min": 125, "realise_min": 85}
+    assert b["par_categorie"]["raquette"] == {"prevu_seances": 1, "realise_seances": 2, "prevu_min": 60, "realise_min": 135}
+    assert b["par_categorie"]["force"]["realise_seances"] == 2
+    assert b["decalages"] == [{"seance": "Push", "de": "2026-10-03", "a": "2026-10-04"}]
+    assert b["remplacements"] == [{"par": "badminton 75 min", "remplace": ["EF 40 min"]}]
+    assert b["manques"] == [] and b["categories_sous_80"] == []
+    assert b["jours_consecutifs_impact_eleve"] == [["2026-09-30", "2026-10-01"], ["2026-10-03", "2026-10-04"]]
+    assert b["charge_totale"] == {"prevu": 750, "realise": 845}
+    assert b["respect_global"] == "respectee"
+    assert b["alerte"] is None                                      # santé 100 %
+
+
+def test_bilan_semaine_charge_trop_haute():
+    x = semaine_du_28()                                             # semaine courte : le badminton pèse lourd
+    services.remplacer(x["bad"], [x["ef_sam"]])
+    b = services.bilan_semaine(LUNDI)
+    assert b["categories_sous_80"] == [] and b["charge_totale"] == {"prevu": 260, "realise": 415}
+    assert b["respect_global"] == "non_respectee"                  # 160 % de la charge prévue
+
+
+def test_bilan_semaine_alerte_vigilance_achille():
+    services.enregistrer_sante({"niveau": "vigilance", "zones": ["Achille G"], "protocole": "kiné"})
+    faire("badminton", "2026-10-03T10:00", 75, 7)
+    faire("course_route", "2026-10-04T08:00", 40)
+    b = services.bilan_semaine(LUNDI)
+    assert b["jours_consecutifs_impact_eleve"] == [["2026-10-03", "2026-10-04"]]
+    assert "samedi, dimanche" in b["alerte"] and "Achille G" in b["alerte"]
+    assert services.tableau_de_bord(date(2026, 10, 4))["bilan_semaine"]["alerte"] == b["alerte"]
+
+
+def test_bilan_semaine_respect():
+    # Deux EF prévues et passées, une seule faite, sans remplacement : course à 50 % → partielle au mieux
+    prevoir("2026-09-29", "EF", duree=40)
+    prevoir("2026-10-01", "EF", duree=40)
+    prevoir("2026-09-30", "muscu_pull", duree=50)
+    faire("course_route", "2026-09-29T07:00", 40, 4)
+    faire("muscu", "2026-09-30T07:00", 50, 4)
+    b = services.bilan_semaine(LUNDI)
+    assert b["manques"] == [{"seance": "EF 40 min", "date": "2026-10-01"}]
+    assert b["categories_sous_80"] == ["course"] and b["respect_global"] in ("partielle", "non_respectee")
+
+
+def test_bilan_semaine_sans_plan():
+    faire("yoga", "2026-09-29T07:00", 30, 2)
+    b = services.bilan_semaine(LUNDI)
+    assert b["respect_global"] is None and b["par_categorie"]["mobilite"]["realise_seances"] == 1

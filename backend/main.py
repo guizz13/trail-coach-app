@@ -247,6 +247,12 @@ def api_semaine(lundi: str):
     return services.semaine(services.lundi_de(date.fromisoformat(lundi)))
 
 
+@app.get("/api/bilan_semaine")
+def api_bilan_semaine(lundi: str):
+    from datetime import date
+    return services.bilan_semaine(date.fromisoformat(lundi))
+
+
 @app.patch("/api/profil")
 def api_profil(valeurs: dict = Body(...)):
     autorises = {"mode_actif", "statut_sante", "notes_sante", "poids_kg"}

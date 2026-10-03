@@ -657,6 +657,122 @@ def annuler_remplacement(seance_id: int) -> dict:
     return detail_seance(seance_id)
 
 
+# ---------------------------------------------------------------------------
+# Bilan de la semaine par catégorie (sans LLM), recalculé à chaque affichage
+# ---------------------------------------------------------------------------
+# Charge prévue estimée, même échelle que le TRIMP : durée × poids de zone typique de la séance
+POIDS_TYPE_PREVU = {"EF": 2, "sortie_longue": 2, "tempo": 3, "cotes": 3, "intervals": 3}
+POIDS_CATEGORIE_PREVUE = {"course": 2, "force": 2, "raquette": 3, "collectif": 3, "porte": 2, "montagne": 2,
+                          "mobilite": 1, "autre": 2}
+LIBELLES_COURTS = {"EF": "EF", "intervals": "Intervalles", "cotes": "Côtes", "tempo": "Tempo",
+                   "sortie_longue": "Sortie longue", "muscu_push": "Push", "muscu_pull": "Pull",
+                   "muscu_jambes": "Jambes", "squash": "Squash", "velo": "Vélo"}
+SEUIL_RESPECT_CATEGORIE = 0.8
+
+
+def charge_prevue(p: dict) -> float:
+    poids = POIDS_TYPE_PREVU.get(p["type"]) or POIDS_CATEGORIE_PREVUE.get(categorie_planifiee(p["type"]) or "", 0)
+    return (p["duree_min"] or 0) * poids
+
+
+def libelle_court(p: dict) -> str:
+    """« EF 40 min », « Push »."""
+    nom = LIBELLES_COURTS.get(p["type"]) or (sports.sport(_sport_du_type(p["type"]))["libelle"]
+                                            if _sport_du_type(p["type"]) else p["type"])
+    return f"{nom} {p['duree_min']:g} min" if p.get("duree_min") and p["type"] not in ("muscu_push", "muscu_pull", "muscu_jambes") else nom
+
+
+def _suites_de_jours(jours: list[str]) -> list[list[str]]:
+    """Suites d'au moins deux jours consécutifs."""
+    suites, courante = [], []
+    for j in sorted(set(jours)):
+        if courante and (date.fromisoformat(j) - date.fromisoformat(courante[-1])).days == 1:
+            courante.append(j)
+        else:
+            if len(courante) > 1:
+                suites.append(courante)
+            courante = [j]
+    return suites + ([courante] if len(courante) > 1 else [])
+
+
+def bilan_semaine(lundi: date) -> dict:
+    """Réalisé vs prévu par catégorie, charge, décalages, remplacements, manques et jours d'impact
+    élevé. respect_global se juge sur la partie écoulée : séances prévues avant aujourd'hui, ou déjà
+    faites, décalées ou remplacées."""
+    lundi = lundi_de(lundi)
+    du, au = lundi.isoformat(), (lundi + timedelta(days=6)).isoformat()
+    jour = aujourdhui().isoformat()
+    remplacees = db.remplacements_par_planifiee()
+    plan = [p for p in db.planifiees_entre(du, au) if p["type"] != "repos" and categorie_planifiee(p["type"])]
+    faites = db.seances_entre(du, au)
+    par_id = {s["id"]: s for s in faites}
+
+    par_categorie: dict[str, dict] = {}
+    ligne = lambda c: par_categorie.setdefault(c, {"prevu_seances": 0, "realise_seances": 0, "prevu_min": 0, "realise_min": 0})
+    for p in plan:
+        l = ligne(categorie_planifiee(p["type"]))
+        l["prevu_seances"] += 1
+        l["prevu_min"] += round(p["duree_min"] or 0)
+    for s in faites:
+        l = ligne(categorie_realisee(s) or "autre")
+        l["realise_seances"] += 1
+        l["realise_min"] += round(s["duree_min"] or 0)
+
+    decalages = [{"seance": libelle_court(p), "de": p["date_seance"], "a": par_id[p["seance_realisee_id"]]["date_debut"][:10]}
+                 for p in plan if p["seance_realisee_id"] in par_id
+                 and par_id[p["seance_realisee_id"]]["date_debut"][:10] != p["date_seance"]]
+    remplacements = []
+    for s in faites:
+        remplacees_s = db.remplacees_par(s["id"])
+        if remplacees_s:
+            remplacements.append({"par": f"{sports.sport(sports.sport_de(s))['libelle'].lower()} {round(s['duree_min'] or 0)} min",
+                                  "remplace": [libelle_court(p) for p in remplacees_s]})
+    manques = [{"seance": libelle_court(p), "date": p["date_seance"]} for p in plan if p["statut"] == "manque"]
+    jours_impact = sorted({s["date_debut"][:10] for s in faites if sports.impact(sports.sport_de(s)) == "eleve"})
+    consecutifs = _suites_de_jours(jours_impact)
+
+    # Respect de la semaine, sur la partie écoulée
+    echues = [p for p in plan if p["date_seance"] < jour or p["seance_realisee_id"] or p["id"] in remplacees]
+    categories_ko = []
+    for c in {categorie_planifiee(p["type"]) for p in echues}:
+        prevues = [p for p in echues if categorie_planifiee(p["type"]) == c]
+        couvertes = sum(1 for p in prevues if p["id"] in remplacees)
+        faites_c = sum(1 for s in faites if categorie_realisee(s) == c and s["date_debut"][:10] <= jour)
+        if min(len(prevues), faites_c + couvertes) < SEUIL_RESPECT_CATEGORIE * len(prevues):
+            categories_ko.append(c)
+    charge_prevue_echue = sum(charge_prevue(p) for p in echues)
+    charge_realisee = sum(s["charge"] or 0 for s in faites if s["date_debut"][:10] <= jour)
+    ratio = charge_realisee / charge_prevue_echue if charge_prevue_echue else None
+    if not echues:
+        respect = None                                          # rien de prévu à cette date
+    elif (ratio is not None and not 0.6 <= ratio <= 1.4) or len(categories_ko) * 2 > len({categorie_planifiee(p["type"]) for p in echues}):
+        respect = "non_respectee"
+    elif categories_ko or (ratio is not None and not 0.8 <= ratio <= 1.2):
+        respect = "partielle"
+    else:
+        respect = "respectee"
+
+    sante = sante_profil()
+    zones = set(sante.get("zones") or []) & metrics.ZONES_BAS_DU_CORPS
+    alerte = None
+    if consecutifs and sante["niveau"] in ("vigilance", "blessure") and zones:
+        alerte = (f"Impact élevé plusieurs jours de suite ({', '.join(jour_de(date.fromisoformat(j)) for j in consecutifs[0])}) "
+                  f"en {sante['niveau']} {', '.join(sorted(zones))}.")
+    return {
+        "lundi": du,
+        "par_categorie": par_categorie,
+        "charge_totale": {"prevu": round(sum(charge_prevue(p) for p in plan)), "realise": round(sum(s["charge"] or 0 for s in faites))},
+        "jours_impact_eleve": jours_impact,
+        "jours_consecutifs_impact_eleve": consecutifs,
+        "decalages": decalages,
+        "remplacements": remplacements,
+        "manques": manques,
+        "respect_global": respect,
+        "categories_sous_80": sorted(categories_ko),
+        "alerte": alerte,
+    }
+
+
 def _datetime_planifiee(p: dict) -> datetime:
     d = date.fromisoformat(p["date_seance"])
     return datetime(d.year, d.month, d.day, HEURE_CRENEAU.get(p["creneau"], 9), tzinfo=TZ)
@@ -1157,6 +1273,7 @@ def tableau_de_bord(d: Optional[date] = None) -> dict:
         "cout_llm": cout_llm_mois(),
         "ajustement": etat_ajustement(d),
         "sante": {**sante_profil(), **sante_libelle_court(sante_profil())},
+        "bilan_semaine": bilan_semaine(lundi),
     }
 
 

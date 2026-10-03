@@ -519,3 +519,10 @@ button.badge { font-family: inherit; }
   background: none; border: 0; border-bottom: 0.5px solid var(--border); color: var(--text-primary); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
 .picker-sport span:not(.disc):not(.badge) { flex: 1; min-width: 0; }
 .picker-sport.propose { color: var(--accent-light); }
+
+/* ---- Bilan de la semaine (Semaine) ------------------------------------------------------- */
+.bilan-cat { display: flex; align-items: center; gap: 10px; }
+.bilan-cat + .bilan-cat { margin-top: 10px; }
+.progression { height: 4px; border-radius: 2px; background: var(--bg-surface); margin-top: 5px; overflow: hidden; }
+.progression > div { height: 100%; background: var(--accent); border-radius: 2px; }
+.bilan-faits { margin: 12px 0 0; padding-left: 16px; }
