@@ -286,7 +286,13 @@ def api_import(fichier: UploadFile = File(...), options: str = Form("{}")):
         analyser=opts.get("analyser", True) is not False,
         douleur=opts.get("douleur"),
         douleur_zone=opts.get("douleur_zone"),
+        rpe=opts.get("rpe"),
     )
+
+
+@app.post("/api/seances_realisees")
+def api_saisir_seance(corps: dict = Body(...)):
+    return services.saisir_seance(corps, analyser=corps.get("analyser", True) is not False)
 
 
 # Protégée comme toute l'API par la session (COACH_PASSWORD) : voir _authentification

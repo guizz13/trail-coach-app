@@ -27,7 +27,7 @@ async function choisirSport(opts = {}) {
     const d = feuille(`<h2>${esc(opts.titre || "Quel sport ?")}</h2>
       ${opts.sousTitre ? `<p class="secondaire" style="margin:0 0 10px">${esc(opts.sousTitre)}</p>` : ""}
       <input type="search" class="picker-recherche" placeholder="Rechercher un sport" autocomplete="off">
-      <div class="picker-liste"></div>`);
+      <div class="picker-liste"></div>`, "feuille-sport");
     const liste = $(".picker-liste", d), champ = $(".picker-recherche", d);
 
     const ligne = s => `<button type="button" class="picker-sport ${s.id === opts.propose ? "propose" : ""}" data-id="${esc(s.id)}">
@@ -59,5 +59,81 @@ async function choisirSport(opts = {}) {
       d.close();
     });
     d.addEventListener("close", () => resoudre(choisi), { once: true });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Saisie manuelle d'une séance réalisée (sans fichier)
+// ---------------------------------------------------------------------------
+// opts : { date (ISO jour par défaut), sante ({niveau}) }. Résout avec la réponse de l'API, ou null.
+async function feuilleSeanceManuelle(opts = {}) {
+  await CATALOGUE_PRET;
+  const maintenantLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  const debut = opts.date && opts.date !== maintenantLocal.slice(0, 10) ? `${opts.date}T18:00` : maintenantLocal;
+  const douleurOuverte = opts.sante && opts.sante.niveau && opts.sante.niveau !== "100";
+  let sportId = (CATALOGUE?.recents || [])[0] || null;
+
+  return new Promise(resoudre => {
+    let resultat = null;
+    const d = feuille(`<h2>Séance réalisée</h2>
+      <form id="saisie">
+        <label>Sport</label>
+        <button type="button" class="picker-sport" data-sport></button>
+        <div class="champs-2">
+          <div><label>Début</label><input type="datetime-local" name="debut" value="${debut}" required></div>
+          <div><label>Durée (min)</label><input type="number" name="duree_min" min="1" max="1440" inputmode="numeric" required></div>
+        </div>
+        <label>Effort ressenti (RPE) : <b data-rpe>5</b>/10</label>
+        <input type="range" name="rpe" min="1" max="10" value="5">
+        <div class="champs-2">
+          <div><label>FC moyenne (facultatif)</label><input type="number" name="fc_moy" min="30" max="230" inputmode="numeric"></div>
+        </div>
+        <div class="champs-2" data-distance>
+          <div><label>Distance (km)</label><input name="distance_km" inputmode="decimal"></div>
+          <div><label>D+ (m)</label><input name="dplus_m" inputmode="numeric"></div>
+        </div>
+        <details ${douleurOuverte ? "open" : ""}><summary><i class="ti ti-plus"></i> Douleur</summary>
+          <div class="champs-2" style="margin-top:8px">
+            <div><label>Douleur (0-10)</label><input type="number" name="douleur" min="0" max="10" inputmode="numeric"></div>
+            <div><label>Zone</label><select name="douleur_zone"><option value="">—</option>${ZONES_SANTE.map(z => `<option>${esc(z)}</option>`).join("")}</select></div>
+          </div>
+        </details>
+        <label>Note</label><textarea name="note" rows="2"></textarea>
+        <label class="coche" style="margin-top:10px"><input type="checkbox" name="analyser" checked>Analyser avec le coach</label>
+        <button type="submit" class="btn principal" style="margin-top:14px">Enregistrer</button>
+        <div data-erreur></div>
+      </form>`);
+    const form = $("#saisie", d), boutonSport = $("[data-sport]", form);
+    const rendreSport = () => {
+      boutonSport.innerHTML = sportId ? `${iconeSport(sportId)}<span>${esc(sportInfo(sportId).libelle)}</span><i class="ti ti-chevron-down muted"></i>`
+        : `<span class="disc autre"><i class="ti ti-help"></i></span><span>Choisir un sport</span><i class="ti ti-chevron-down muted"></i>`;
+      $("[data-distance]", form).classList.toggle("hidden", !sportId || !sportInfo(sportId).distance);
+    };
+    rendreSport();
+    // Le sélecteur s'ouvre par-dessus la saisie (feuille empilée)
+    boutonSport.onclick = async () => {
+      const choix = await choisirSport({ propose: sportId });
+      if (choix) { sportId = choix; rendreSport(); }
+    };
+    $("[name=rpe]", form).oninput = e => { $("[data-rpe]", form).textContent = e.target.value; };
+    form.onsubmit = async e => {
+      e.preventDefault();
+      if (!sportId) { erreurSimple($("[data-erreur]", form), new Error("Choisir un sport.")); return; }
+      const fd = new FormData(form), corps = { sport_id: sportId, analyser: fd.get("analyser") === "on" };
+      ["debut", "duree_min", "rpe", "fc_moy", "distance_km", "dplus_m", "douleur", "douleur_zone", "note"]
+        .forEach(k => { const v = fd.get(k); if (v !== null && v !== "") corps[k] = v; });
+      const bouton = $("button[type=submit]", form);
+      bouton.disabled = true;
+      bouton.textContent = corps.analyser ? "Analyse en cours…" : "Enregistrement…";
+      try {
+        resultat = await api("POST", "/api/seances_realisees", corps);
+        d.close();
+      } catch (err) {
+        bouton.disabled = false;
+        bouton.textContent = "Enregistrer";
+        erreurSimple($("[data-erreur]", form), err);
+      }
+    };
+    d.addEventListener("close", () => resoudre(resultat), { once: true });
   });
 }

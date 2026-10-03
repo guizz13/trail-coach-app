@@ -22,6 +22,8 @@ from typing import Iterable, Optional
 # Charge d'une séance
 # ---------------------------------------------------------------------------
 POIDS_ZONES = {"z1": 1, "z2": 2, "z3": 3, "z4": 4, "z5": 5}
+# Séance sans zones FC (saisie manuelle, fichier sans cardio) : RPE ramené au poids de zone équivalent
+POIDS_RPE = {1: 1, 2: 1, 3: 1, 4: 2, 5: 2, 6: 3, 7: 3, 8: 4, 9: 5, 10: 5}
 
 
 def charge_seance(seance: dict) -> float:
@@ -29,13 +31,32 @@ def charge_seance(seance: dict) -> float:
     Charge d'une séance : TRIMP d'Edwards, somme des minutes passées dans chaque zone × poids de la zone.
 
     Les zones viennent de extractor._calculer_zones (temps_zones_s, en secondes ; le temps sous Z1
-    est compté en Z1). Sans fréquence cardiaque : hypothèse d'une Z2 moyenne (durée × 2).
+    est compté en Z1). Sans zones : charge_manuelle (FC moyenne, sinon RPE), et à défaut
+    hypothèse d'une Z2 moyenne (durée × 2).
     L'EPOC Suunto (pic d'excès d'oxygène, non cumulable) ne participe plus à la charge.
     """
     zones_s = seance.get("temps_zones_s") or {}
     if zones_s and sum(zones_s.values()) > 0:
         return round(sum(POIDS_ZONES[z] * zones_s.get(z, 0) / 60 for z in POIDS_ZONES), 1)
-    return round(float(seance.get("duree_min") or 0) * 2, 1)
+    duree = float(seance.get("duree_min") or 0)
+    fc = seance.get("fc_moy") or seance.get("fc_moy_bpm")
+    if fc or seance.get("rpe"):
+        return charge_manuelle(duree, seance.get("rpe"), fc)
+    return round(duree * 2, 1)
+
+
+def zone_de(fc_bpm: float) -> str:
+    """Zone (z1..z5) d'une FC en bpm, d'après extractor.ZONES_BPM."""
+    from extractor import ZONES_BPM
+    return next((z for z, (bas, haut) in ZONES_BPM.items() if fc_bpm <= haut), "z5")
+
+
+def charge_manuelle(duree_min: float, rpe: Optional[int] = None, fc_moy: Optional[float] = None) -> float:
+    """Séance sans zones, sur la même échelle que le TRIMP d'Edwards : durée × poids de la zone
+    de la FC moyenne, sinon durée × poids du RPE."""
+    if fc_moy:
+        return round(duree_min * POIDS_ZONES[zone_de(fc_moy)], 1)
+    return round(duree_min * POIDS_RPE[int(rpe)], 1)
 
 
 def charge_semaine(seances: Iterable[dict]) -> float:

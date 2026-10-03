@@ -24,7 +24,10 @@
     <div class="titre">Déposer les fichiers JSON Suunto</div>
     <div class="sous-texte">ou toucher pour choisir</div>
   </label>
-  <label class="coche" style="margin-top:14px"><input type="checkbox" id="avec-llm" checked>Analyser avec le coach</label>
+  <div class="ligne entre" style="margin-top:14px">
+    <label class="coche"><input type="checkbox" id="avec-llm" checked>Analyser avec le coach</label>
+    <button type="button" class="btn petit" id="saisie-manuelle"><i class="ti ti-pencil-plus"></i>Sans fichier</button>
+  </div>
   <div id="cartes" style="margin-top:14px"></div>
 </main>
 <script src="/static/app.js"></script>

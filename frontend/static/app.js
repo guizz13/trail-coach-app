@@ -282,11 +282,12 @@ function jaugeCharge(a) {
 }
 
 // Feuille modale (bas d'écran)
-function feuille(html) {
-  let d = $("#feuille");
+// id : une seconde feuille (ex. sélecteur de sport) s'empile au-dessus de la première
+function feuille(html, id = "feuille") {
+  let d = document.getElementById(id);
   if (!d) {
     d = document.createElement("dialog");
-    d.id = "feuille";
+    d.id = id;
     d.className = "feuille";
     d.addEventListener("click", e => { if (e.target === d) d.close(); });
     document.body.appendChild(d);

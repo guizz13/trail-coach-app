@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import uuid
 from dataclasses import asdict
 from datetime import date, datetime, timedelta
 from typing import Optional
@@ -572,7 +573,8 @@ def acwr_dict(a: metrics.ACWR) -> dict:
 def importer_et_analyser(fichier_bytes: bytes, nom: str, muscu_detail: Optional[dict] = None,
                          sport_id: Optional[str] = None, sous_type: Optional[str] = None,
                          analyser: bool = True, douleur: Optional[int] = None,
-                         douleur_zone: Optional[str] = None, famille: Optional[str] = None) -> dict:
+                         douleur_zone: Optional[str] = None, famille: Optional[str] = None,
+                         rpe: Optional[int] = None) -> dict:
     """Un code ActivityType inconnu ne fait jamais échouer l'import : la séance est enregistrée en
     « autre », marquée sport_a_preciser, et l'analyse LLM attend le choix du sport (preciser_sport).
     famille : ancien paramètre (avant v5), converti en sport."""
@@ -600,6 +602,9 @@ def importer_et_analyser(fichier_bytes: bytes, nom: str, muscu_detail: Optional[
         if not 0 <= d_val <= 10:
             raise ErreurImport("Douleur : valeur entre 0 et 10.")
         ligne.update(douleur=d_val, douleur_zone=(douleur_zone or None))
+    if rpe not in (None, ""):
+        ligne["rpe"] = _rpe_valide(rpe)
+        ligne["charge"] = round(metrics.charge_seance(ligne), 1)      # RPE : utile si le fichier n'a pas de FC
     try:
         with db.connexion() as c:
             seance_id = db.inserer("seances_realisees", ligne, conn=c)
@@ -681,6 +686,60 @@ def analyser_seance(seance_id: int, analyser: bool = True, confirme: bool = Fals
         "ajustements_appliques": appliques,
         "validation_requise": validation_requise,
     }
+
+
+def _rpe_valide(rpe) -> int:
+    try:
+        v = int(rpe)
+    except (TypeError, ValueError):
+        raise ErreurImport("RPE : valeur entre 1 et 10.")
+    if not 1 <= v <= 10:
+        raise ErreurImport("RPE : valeur entre 1 et 10.")
+    return v
+
+
+def saisir_seance(donnees: dict, analyser: bool = True) -> dict:
+    """Séance réalisée saisie à la main (sans fichier) : sport, début, durée, RPE (obligatoire sans FC),
+    FC moyenne, distance et D+ si le sport en a, douleur, note. Charge : metrics.charge_manuelle."""
+    sport_id = donnees.get("sport_id")
+    if sport_id not in sports.SPORTS_PAR_ID:
+        raise ErreurImport("Choisir un sport.")
+    try:
+        debut = en_paris(str(donnees.get("debut") or ""))
+    except ValueError:
+        raise ErreurImport("Date et heure de début invalides.")
+    duree = _nombre(donnees.get("duree_min"))
+    if not duree or duree <= 0 or duree > 24 * 60:
+        raise ErreurImport("Durée invalide (minutes).")
+    fc = _nombre(donnees.get("fc_moy"))
+    if fc is not None and not 30 <= fc <= 230:
+        raise ErreurImport("FC moyenne invalide.")
+    rpe = _rpe_valide(donnees["rpe"]) if donnees.get("rpe") not in (None, "") else None
+    if rpe is None and not fc:
+        raise ErreurImport("RPE obligatoire sans fréquence cardiaque.")
+    avec_distance = sports.sport(sport_id)["distance"]
+    km = (_nombre(donnees.get("distance_km")) or 0) if avec_distance else 0
+    dplus = _nombre(donnees.get("dplus_m")) if avec_distance else None
+    uid = str(uuid.uuid4())
+    ligne = {
+        "fichier_hash": f"manuel:{uid}", "fichier_nom": None, "activity_type_code": 0,
+        "famille": sports.famille_heritee(sport_id), "sport_id": sport_id,
+        "source": "manuel", "source_id": uid, "source_code": None,
+        "date_debut": debut.isoformat(timespec="seconds"), "duree_min": duree,
+        "distance_km": km, "dplus_m": dplus,
+        "vitesse_moy_kmh": round(km / (duree / 60), 2) if km else None,
+        "fc_moy": int(fc) if fc else None, "a_fc": 0, "a_gps": 0, "rpe": rpe,
+        "note": (donnees.get("note") or "").strip() or None,
+        "charge": metrics.charge_manuelle(duree, rpe, fc),
+        "importe_le": maintenant().isoformat(timespec="seconds"),
+    }
+    if donnees.get("douleur") not in (None, ""):
+        d_val = int(donnees["douleur"])
+        if not 0 <= d_val <= 10:
+            raise ErreurImport("Douleur : valeur entre 0 et 10.")
+        ligne.update(douleur=d_val, douleur_zone=donnees.get("douleur_zone") or None)
+    seance_id = db.inserer("seances_realisees", ligne)
+    return analyser_seance(seance_id, analyser)
 
 
 def proposition_sport(seance: dict) -> Optional[dict]:

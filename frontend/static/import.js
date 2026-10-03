@@ -9,6 +9,22 @@ const depot = $("#depot"), entree = $("#fichiers");
 depot.addEventListener("drop", e => traiter([...e.dataTransfer.files]));
 entree.addEventListener("change", () => { traiter([...entree.files]); entree.value = ""; });
 
+// Séance réalisée sans fichier : saisie manuelle, résultat affiché comme un import
+$("#saisie-manuelle").onclick = async () => {
+  const r = await feuilleSeanceManuelle();
+  if (!r) return;
+  const el = document.createElement("div");
+  el.className = "carte";
+  el.style.marginBottom = "8px";
+  const s = r.seance;
+  el.innerHTML = `<div class="seance" style="cursor:default">${iconeSport(s.sport_id)}
+      <div class="seance-corps"><div class="seance-type">${esc(sportInfo(s.sport_id).libelle)}</div>
+        <div class="seance-detail">${esc(dateFR(s.date_debut, { weekday: "long", day: "numeric", month: "long" }))} · ${esc(heure(s.date_debut))} · saisie manuelle</div></div></div>
+    <div class="resultat"></div>`;
+  $("#cartes").prepend(el);
+  afficherResultat($(".resultat", el), r, true);
+};
+
 async function traiter(fichiers) {
   fichiers = fichiers.filter(f => f.name.toLowerCase().endsWith(".json"));
   if (!fichiers.length) return;
@@ -87,6 +103,8 @@ function carte(a, fichier, brut) {
       ${estCourse && a.demander_sous_type ? `<div class="bandeau orange">Type détecté : <b>${esc(libelleType(s.sous_type))}</b> — corriger ?</div>
         <select name="sous_type" style="margin-top:8px">${a.sous_types.map(t => `<option value="${t}" ${t === s.sous_type ? "selected" : ""}>${esc(libelleType(t))}</option>`).join("")}</select>` : ""}
       ${s.sport_id === "muscu" ? formulaireMuscu(a) : ""}
+      <label>Effort ressenti (RPE, facultatif)</label>
+      <select name="rpe"><option value="">—</option>${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => `<option>${n}</option>`).join("")}</select>
       <details><summary><i class="ti ti-plus"></i> Signaler une douleur</summary>
         <div class="champs-2" style="margin-top:8px">
           <div><label>Douleur (0-10)</label><input type="number" name="douleur" min="0" max="10" inputmode="numeric"></div>
@@ -120,6 +138,7 @@ function carte(a, fichier, brut) {
     const fd = new FormData(form);
     const opts = { analyser: $("#avec-llm").checked };
     if (sportChoisi) opts.sport_id = sportChoisi;
+    if (fd.get("rpe")) opts.rpe = Number(fd.get("rpe"));
     if (fd.get("sous_type")) opts.sous_type = fd.get("sous_type");
     if (fd.get("douleur") !== null && fd.get("douleur") !== "") { opts.douleur = Number(fd.get("douleur")); opts.douleur_zone = fd.get("douleur_zone") || null; }
     if (s.sport_id === "muscu") {

@@ -28,6 +28,7 @@ async function charger(lundi) {
     rendrePlanning(jours, realisees, verdicts);
     rendreReajuster(courante);
     $("#ajouter").classList.toggle("hidden", !courante);   // ajout : semaine en cours uniquement
+    $("#ajouter-realisee").classList.toggle("hidden", !courante);
   } catch (e) { erreurSimple($("#planning"), e); }
 }
 
@@ -263,6 +264,13 @@ function recharger() { const l = lundiAffiche; tableau = null; charger(l); }
 const decaler = n => charger(ajouterJours(lundiAffiche, 7 * n));
 $("#prec").onclick = () => decaler(-1);
 $("#suiv").onclick = () => decaler(1);
+// Séance réalisée sans fichier (badminton, séance oubliée…) : saisie manuelle, puis relecture de la semaine
+$("#ajouter-realisee").onclick = async () => {
+  const r = await feuilleSeanceManuelle({ date: tableau?.aujourdhui, sante: tableau?.sante });
+  if (!r) return;
+  tableau = null;
+  await charger(lundiAffiche);
+};
 $("#ajouter").onclick = () => editer({ date_seance: tableau && lundiAffiche === tableau.lundi ? tableau.aujourdhui : lundiAffiche, creneau: "matin", type: "EF", statut: "prevu" });
 let depart = null;
 document.addEventListener("touchstart", e => { const t = e.touches[0]; depart = [t.clientX, t.clientY]; }, { passive: true });
