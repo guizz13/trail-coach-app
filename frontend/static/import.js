@@ -25,6 +25,8 @@ $("#saisie-manuelle").onclick = async () => {
   afficherResultat($(".resultat", el), r, true);
 };
 
+const SOURCES_SEANCE = { manuel: "saisie manuelle", strava: "Strava", suunto_json: "fichier Suunto" };
+
 async function traiter(fichiers) {
   fichiers = fichiers.filter(f => f.name.toLowerCase().endsWith(".json"));
   if (!fichiers.length) return;
@@ -98,6 +100,7 @@ function carte(a, fichier, brut) {
     ${statsHTML(s, a.charge)}
     ${s.a_fc ? barreZones(zonesDepuisPct(s.temps_zones_pct)) : `<div class="bandeau gris">Pas de fréquence cardiaque dans ce fichier.</div>`}
     <form>
+      ${a.fusion_avec ? `<div class="bandeau gris">Séance déjà enregistrée (${esc(SOURCES_SEANCE[a.fusion_avec.source] || a.fusion_avec.source)}) : le fichier la complétera, sans doublon.</div>` : ""}
       ${a.sport_a_preciser ? `<div class="bandeau orange">Code d'activité ${s.activity_type_code} inconnu : quel sport ? Le choix est mémorisé pour les prochains fichiers.</div>
         <button type="button" class="badge orange" data-choisir style="margin-top:8px">Choisir le sport</button>` : ""}
       ${estCourse && a.demander_sous_type ? `<div class="bandeau orange">Type détecté : <b>${esc(libelleType(s.sous_type))}</b> — corriger ?</div>
@@ -169,7 +172,7 @@ function carte(a, fichier, brut) {
 }
 
 function afficherResultat(el, r, analyseDemandee) {
-  if (r.doublon) { el.innerHTML = `<div class="bandeau gris">Déjà importé — ignoré</div>`; return; }
+  if (r.doublon) { el.innerHTML = `<div class="bandeau gris">${esc(r.fusion ? r.message : "Déjà importé — ignoré")}</div>`; return; }
   if (r.sport_a_preciser) { sportAPreciser(el, r, analyseDemandee); return; }
   const a = r.analyse_llm, acwr = r.indicateurs.acwr;
   const signaux = (r.indicateurs.signaux || []).map(s => `<li>${esc(s.detail)}</li>`).join("");

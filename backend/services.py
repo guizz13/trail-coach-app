@@ -20,6 +20,8 @@ import db
 import extractor
 import metrics
 import sports
+from sources import strava, suunto_json
+from sources.base import RICHESSE_SOURCE, ActiviteNormalisee
 
 TZ = ZoneInfo("Europe/Paris")
 
@@ -134,38 +136,36 @@ def split_propose() -> str:
 # Import : extraction
 # ---------------------------------------------------------------------------
 def hash_fichier(fichier_bytes: bytes) -> str:
-    return hashlib.sha256(fichier_bytes).hexdigest()
+    return suunto_json.empreinte(fichier_bytes)
 
 
-def _extraire(fichier_bytes: bytes, sport_id: Optional[str] = None,
-              sous_type: Optional[str] = None) -> tuple[extractor.SeanceExtraite, bool]:
-    """Extraction + corrections utilisateur. Retourne (séance, sous_type_confirme)."""
+def _activite_suunto(fichier_bytes: bytes, nom: Optional[str] = None, sport_id: Optional[str] = None,
+                     sous_type: Optional[str] = None) -> tuple[ActiviteNormalisee, bool]:
+    """Fichier Suunto → ActiviteNormalisee, corrections utilisateur comprises.
+    Retourne (activité, sous_type_confirme)."""
     try:
         data = json.loads(fichier_bytes)
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
         raise ErreurImport(f"Fichier JSON invalide : {e}") from e
     if not isinstance(data, dict) or "DeviceLog" not in data:
         raise ErreurImport("Format inattendu : clé 'DeviceLog' absente (export Suunto attendu).")
-
+    if sport_id and sport_id not in sports.SPORTS_PAR_ID:
+        raise ErreurImport(f"Sport inconnu : {sport_id}")
     try:
-        s = extractor.extraire(data, db.activity_types("suunto_json"))
+        a = suunto_json.normaliser(data, db.activity_types(suunto_json.SOURCE), hash_fichier(fichier_bytes),
+                                   nom, sport_id)
     except (KeyError, TypeError, ValueError) as e:
         raise ErreurImport(f"Extraction impossible : {e}") from e
-    if not s.date_debut:
+    if not a.debut:
         raise ErreurImport("Date de début absente du fichier.")
 
-    if sport_id and sport_id != s.sport_id:
-        if sport_id not in sports.SPORTS_PAR_ID:
-            raise ErreurImport(f"Sport inconnu : {sport_id}")
-        extractor.appliquer_sport(s, sport_id)
-
     confirme = False
-    if sous_type and s.famille in extractor.FAMILLE_COURSE:
+    if sous_type and sports.categorie(a.sport_id) == "course":
         if sous_type not in SOUS_TYPES_COURSE:
             raise ErreurImport(f"Sous-type inconnu : {sous_type}")
         confirme = True
-        s.sous_type = sous_type
-    return s, confirme
+        a.sous_type = sous_type
+    return a, confirme
 
 
 def apercu_import(fichier_bytes: bytes, nom: str) -> dict:
@@ -176,62 +176,73 @@ def apercu_import(fichier_bytes: bytes, nom: str) -> dict:
         return {"nom": nom, "hash": h, "doublon": True, "seance_id": existant["id"],
                 "message": f"Déjà importé le {existant['importe_le'][:10]} (séance #{existant['id']})."}
 
-    s, _ = _extraire(fichier_bytes)
-    d = s.to_dict()
+    a, _ = _activite_suunto(fichier_bytes, nom)
+    d = {**a.brut, "sport_id": a.sport_id, "sous_type": a.sous_type}
+    jumelle = doublon_entre_sources(a)
     return {
         "nom": nom,
         "hash": h,
         "doublon": False,
         "seance": d,
         "charge": round(metrics.charge_seance(d), 1),
-        "sport_a_preciser": not s.code_connu,
-        "proposition": extractor.deviner_sport(s) if not s.code_connu else None,
-        "demander_sous_type": s.famille in extractor.FAMILLE_COURSE and (s.confiance or 0) < SEUIL_CONFIANCE,
-        "split_propose": split_propose() if s.sport_id == "muscu" else None,
+        "sport_a_preciser": not a.sport_connu,
+        "proposition": extractor.deviner_sport(suunto_json.seance_extraite(a)) if not a.sport_connu else None,
+        "fusion_avec": {"id": jumelle["id"], "source": jumelle["source"]} if jumelle else None,
+        "demander_sous_type": sports.categorie(a.sport_id) == "course" and (a.sous_type_confiance or 0) < SEUIL_CONFIANCE,
+        "split_propose": split_propose() if a.sport_id == "muscu" else None,
         "sous_types": SOUS_TYPES_COURSE,
         "groupes_muscu": GROUPES_MUSCU,
         "splits_muscu": SPLITS_MUSCU,
     }
 
 
-def _ligne_seance(s: extractor.SeanceExtraite, h: str, nom: str, confirme: bool) -> dict:
-    d = s.to_dict()
-    d.pop("sport_id"), d.pop("code_connu")
-    return {
-        "fichier_hash": h,
-        "fichier_nom": nom,
-        "activity_type_code": s.activity_type_code,
-        "famille": s.famille,
-        "sport_id": s.sport_id,
-        "sport_a_preciser": int(not s.code_connu),
-        "source": "suunto_json",
-        "source_id": h,
-        "source_code": str(s.activity_type_code),
-        "sous_type": s.sous_type,
-        "sous_type_confiance": s.confiance,
+def _ligne_seance(a: ActiviteNormalisee, confirme: bool = False) -> dict:
+    """Ligne seances_realisees depuis une activité normalisée (toutes sources)."""
+    zones_s = {z: round(m * 60, 3) for z, m in (a.zones_minutes or {}).items()}
+    total = sum(zones_s.values())
+    pct = a.zones_pct or ({z: round(100 * v / total, 1) for z, v in zones_s.items()} if total else {})
+    det = a.details or {}
+    vitesse = det.get("vitesse_moy_kmh")
+    if vitesse is None and a.distance_m and a.duree_s:
+        vitesse = round(a.distance_km / (a.duree_s / 3600), 2)
+    ligne = {
+        "fichier_hash": a.empreinte or f"{a.source}:{a.source_id}",
+        "fichier_nom": a.nom,
+        "activity_type_code": int(a.source_code) if (a.source_code or "").isdigit() else 0,
+        "famille": sports.famille_heritee(a.sport_id),
+        "sport_id": a.sport_id,
+        "sport_a_preciser": int(not a.sport_connu),
+        "source": a.source,
+        "source_id": a.source_id,
+        "source_code": a.source_code,
+        "sous_type": a.sous_type,
+        "sous_type_confiance": a.sous_type_confiance,
         "sous_type_confirme": int(confirme),
-        "date_debut": en_paris(s.date_debut).isoformat(timespec="seconds"),
-        "duree_min": s.duree_min,
-        "distance_km": s.distance_km,
-        "dplus_m": s.d_plus_m,
-        "dmoins_m": s.d_moins_m,
-        "vitesse_moy_kmh": s.vitesse_moy_kmh,
-        "fc_moy": s.fc_moy_bpm,
-        "fc_max": s.fc_max_bpm,
-        "temps_zones_s": s.temps_zones_s,
-        "temps_zones_pct": s.temps_zones_pct,
-        "epoc": s.epoc,
-        "recovery_time_h": s.recovery_time_h,
-        "peak_training_effect": s.peak_training_effect,
-        "vo2max": s.vo2max,
-        "energie_kcal": s.energie_kcal,
-        "feeling": s.feeling,
-        "a_gps": int(s.a_gps),
-        "a_fc": int(s.a_fc),
-        "charge": round(metrics.charge_seance(d), 1),
-        "donnees_brutes": d,
+        "date_debut": en_paris(a.debut).isoformat(timespec="seconds"),
+        "duree_min": a.duree_min,
+        "distance_km": a.distance_km,
+        "dplus_m": a.d_plus_m,
+        "dmoins_m": det.get("d_moins_m"),
+        "vitesse_moy_kmh": vitesse,
+        "fc_moy": a.fc_moy,
+        "fc_max": a.fc_max,
+        "temps_zones_s": zones_s,
+        "temps_zones_pct": pct,
+        "epoc": det.get("epoc"),
+        "recovery_time_h": det.get("recovery_time_h"),
+        "peak_training_effect": det.get("peak_training_effect"),
+        "vo2max": det.get("vo2max"),
+        "energie_kcal": det.get("energie_kcal"),
+        "feeling": det.get("feeling"),
+        "a_gps": int(a.gps_present),
+        "a_fc": int(bool(det.get("a_fc"))),
+        "rpe": a.rpe,
+        "note": a.note,
+        "donnees_brutes": a.brut,
         "importe_le": maintenant().isoformat(timespec="seconds"),
     }
+    ligne["charge"] = round(metrics.charge_seance(ligne), 1)
+    return ligne
 
 
 def _valider_muscu(detail: dict) -> dict:
@@ -575,9 +586,9 @@ def importer_et_analyser(fichier_bytes: bytes, nom: str, muscu_detail: Optional[
                          analyser: bool = True, douleur: Optional[int] = None,
                          douleur_zone: Optional[str] = None, famille: Optional[str] = None,
                          rpe: Optional[int] = None) -> dict:
-    """Un code ActivityType inconnu ne fait jamais échouer l'import : la séance est enregistrée en
-    « autre », marquée sport_a_preciser, et l'analyse LLM attend le choix du sport (preciser_sport).
-    famille : ancien paramètre (avant v5), converti en sport."""
+    """Import d'un fichier Suunto. Un code ActivityType inconnu ne fait jamais échouer l'import :
+    la séance est enregistrée en « autre », marquée sport_a_preciser, et l'analyse LLM attend le
+    choix du sport (preciser_sport). famille : ancien paramètre (avant v5), converti en sport."""
     # 1. Hash, anti-doublon
     h = hash_fichier(fichier_bytes)
     existant = db.seance_par_hash(h)
@@ -585,37 +596,114 @@ def importer_et_analyser(fichier_bytes: bytes, nom: str, muscu_detail: Optional[
         return {"doublon": True, "seance_id": existant["id"],
                 "message": f"Fichier déjà importé (séance #{existant['id']})."}
 
-    # 2. Extraction → seances_realisees
+    # 2. Extraction → ActiviteNormalisee
     if famille and not sport_id:
         if famille not in FAMILLES:
             raise ErreurImport(f"Famille inconnue : {famille}")
         sport_id = sports.SPORT_DEPUIS_FAMILLE[famille]
-    s, confirme = _extraire(fichier_bytes, sport_id, sous_type)
-    if sport_id and not s.code_connu:
-        # Choix fait dès l'aperçu : le code est appris pour les prochains fichiers
-        db.enregistrer_activity_type(s.activity_type_code, sport_id, "suunto_json")
-        s.code_connu = True
+    a, confirme = _activite_suunto(fichier_bytes, nom, sport_id, sous_type)
+    if sport_id and a.source_code not in db.activity_types(suunto_json.SOURCE):
+        # Choix fait dès l'aperçu pour un code inconnu : appris pour les prochains fichiers
+        db.enregistrer_activity_type(a.source_code, sport_id, suunto_json.SOURCE)
+    if rpe not in (None, ""):
+        a.rpe = _rpe_valide(rpe)
+    return importer_activite(a, confirme, analyser, muscu_detail, douleur, douleur_zone)
 
-    ligne = _ligne_seance(s, h, nom, confirme)
+
+def importer_strava(activite_json: dict, streams: Optional[dict] = None, analyser: bool = True) -> dict:
+    """Activité Strava déjà téléchargée (pas de client HTTP en V1)."""
+    return importer_activite(strava.normaliser(activite_json, streams, db.activity_types(strava.SOURCE)),
+                             analyser=analyser)
+
+
+def importer_activite(a: ActiviteNormalisee, confirme: bool = False, analyser: bool = True,
+                      muscu_detail: Optional[dict] = None, douleur: Optional[int] = None,
+                      douleur_zone: Optional[str] = None) -> dict:
+    """Point d'entrée commun à toutes les sources : anti-doublon, fusion entre sources, insertion,
+    puis analyse (analyser_seance)."""
+    ligne = _ligne_seance(a, confirme)
     if douleur not in (None, ""):
         d_val = int(douleur)
         if not 0 <= d_val <= 10:
             raise ErreurImport("Douleur : valeur entre 0 et 10.")
         ligne.update(douleur=d_val, douleur_zone=(douleur_zone or None))
-    if rpe not in (None, ""):
-        ligne["rpe"] = _rpe_valide(rpe)
-        ligne["charge"] = round(metrics.charge_seance(ligne), 1)      # RPE : utile si le fichier n'a pas de FC
+
+    # Anti-doublon strict : même fichier, même activité de la source
+    existant = db.seance_par_hash(ligne["fichier_hash"]) or db.fetch_one(
+        "SELECT * FROM seances_realisees WHERE source = ? AND source_id = ?", (a.source, a.source_id))
+    if existant:
+        return {"doublon": True, "seance_id": existant["id"], "message": "Déjà importée."}
+    # Même séance arrivée par une autre source : pas de nouvelle ligne, on complète l'existante
+    jumelle = doublon_entre_sources(a)
+    if jumelle:
+        return fusionner(jumelle, ligne)
+
     try:
         with db.connexion() as c:
             seance_id = db.inserer("seances_realisees", ligne, conn=c)
             # 3. Détail muscu
-            if s.sport_id == "muscu" and muscu_detail:
+            if a.sport_id == "muscu" and muscu_detail:
                 db.inserer("muscu_detail", {"seance_id": seance_id, **_valider_muscu(muscu_detail)}, conn=c)
     except sqlite3.IntegrityError:
-        existant = db.seance_par_hash(h)
-        return {"doublon": True, "seance_id": existant["id"] if existant else None,
-                "message": "Fichier déjà importé."}
+        existant = db.seance_par_hash(ligne["fichier_hash"])
+        return {"doublon": True, "seance_id": existant["id"] if existant else None, "message": "Déjà importée."}
     return analyser_seance(seance_id, analyser, confirme)
+
+
+ECART_DEBUT_DOUBLON = timedelta(minutes=3)
+ECART_DUREE_DOUBLON = 0.10
+LIBELLES_SOURCE = {"suunto_json": "fichier Suunto", "strava": "Strava", "manuel": "saisie manuelle"}
+# Champs qu'une source moins riche peut compléter (jamais écraser)
+CHAMPS_COMPLETABLES = ("rpe", "note", "dplus_m", "distance_km", "fc_moy", "fc_max", "douleur", "douleur_zone",
+                       "temps_zones_s", "temps_zones_pct", "a_gps", "a_fc", "vitesse_moy_kmh")
+
+
+def doublon_entre_sources(a: ActiviteNormalisee) -> Optional[dict]:
+    """Séance déjà enregistrée par une autre source : même catégorie (ou sport encore à préciser),
+    début à ± 3 min, durée à ± 10 %."""
+    debut = en_paris(a.debut)
+    for s in db.seances_entre((debut.date() - timedelta(days=1)).isoformat(),
+                              (debut.date() + timedelta(days=1)).isoformat()):
+        if s["source"] == a.source:
+            continue
+        meme_categorie = sports.categorie(s["sport_id"]) == sports.categorie(a.sport_id) \
+            or s["sport_a_preciser"] or not a.sport_connu
+        duree = max(s["duree_min"] or 0, a.duree_min) or 1
+        if meme_categorie and abs(en_paris(s["date_debut"]) - debut) <= ECART_DEBUT_DOUBLON \
+                and abs((s["duree_min"] or 0) - a.duree_min) <= ECART_DUREE_DOUBLON * duree:
+            return s
+    return None
+
+
+def _vide(v) -> bool:
+    return v in (None, "", 0, {}) or (isinstance(v, dict) and not any(v.values()))
+
+
+def fusionner(existante: dict, nouvelle: dict) -> dict:
+    """Une seule ligne par séance. La source la plus riche (Suunto JSON > Strava > manuel) fournit les
+    mesures ; RPE, note, douleur et sport déjà choisis sont conservés. Sinon : la nouvelle source
+    complète seulement les champs vides."""
+    if RICHESSE_SOURCE.get(nouvelle["source"], 0) > RICHESSE_SOURCE.get(existante["source"], 0):
+        maj = {k: v for k, v in nouvelle.items() if k != "importe_le"}
+        for k in ("rpe", "note", "douleur", "douleur_zone"):
+            if _vide(maj.get(k)):
+                maj.pop(k, None)
+        if not existante["sport_a_preciser"]:              # sport déjà connu : il est gardé
+            for k in ("sport_id", "famille", "sport_a_preciser"):
+                maj.pop(k)
+            if sports.categorie(existante["sport_id"]) != "course":
+                maj.update(sous_type=None, sous_type_confiance=None)
+    else:
+        maj = {k: nouvelle[k] for k in CHAMPS_COMPLETABLES
+               if k in nouvelle and _vide(existante.get(k)) and not _vide(nouvelle[k])}
+    if maj:
+        maj["charge"] = round(metrics.charge_seance({**existante, **maj}), 1)
+        db.maj("seances_realisees", existante["id"], maj)
+        recalculer_semaine(lundi_de(date_de(existante["date_debut"])))
+    seance = db.seance(existante["id"])
+    return {"doublon": True, "fusion": True, "seance_id": seance["id"], "seance": _seance_publique(seance),
+            "message": f"Même séance que la {LIBELLES_SOURCE.get(existante['source'], existante['source'])} "
+                       f"du {seance['date_debut'][:10]} : complétée, pas de doublon."}
 
 
 def analyser_seance(seance_id: int, analyser: bool = True, confirme: bool = False) -> dict:
@@ -718,28 +806,15 @@ def saisir_seance(donnees: dict, analyser: bool = True) -> dict:
     if rpe is None and not fc:
         raise ErreurImport("RPE obligatoire sans fréquence cardiaque.")
     avec_distance = sports.sport(sport_id)["distance"]
-    km = (_nombre(donnees.get("distance_km")) or 0) if avec_distance else 0
-    dplus = _nombre(donnees.get("dplus_m")) if avec_distance else None
-    uid = str(uuid.uuid4())
-    ligne = {
-        "fichier_hash": f"manuel:{uid}", "fichier_nom": None, "activity_type_code": 0,
-        "famille": sports.famille_heritee(sport_id), "sport_id": sport_id,
-        "source": "manuel", "source_id": uid, "source_code": None,
-        "date_debut": debut.isoformat(timespec="seconds"), "duree_min": duree,
-        "distance_km": km, "dplus_m": dplus,
-        "vitesse_moy_kmh": round(km / (duree / 60), 2) if km else None,
-        "fc_moy": int(fc) if fc else None, "a_fc": 0, "a_gps": 0, "rpe": rpe,
-        "note": (donnees.get("note") or "").strip() or None,
-        "charge": metrics.charge_manuelle(duree, rpe, fc),
-        "importe_le": maintenant().isoformat(timespec="seconds"),
-    }
-    if donnees.get("douleur") not in (None, ""):
-        d_val = int(donnees["douleur"])
-        if not 0 <= d_val <= 10:
-            raise ErreurImport("Douleur : valeur entre 0 et 10.")
-        ligne.update(douleur=d_val, douleur_zone=donnees.get("douleur_zone") or None)
-    seance_id = db.inserer("seances_realisees", ligne)
-    return analyser_seance(seance_id, analyser)
+    a = ActiviteNormalisee(
+        source="manuel", source_id=str(uuid.uuid4()), source_code=None, sport_id=sport_id,
+        debut=debut.isoformat(timespec="seconds"), duree_s=duree * 60,
+        distance_m=((_nombre(donnees.get("distance_km")) or 0) * 1000) if avec_distance else 0,
+        d_plus_m=_nombre(donnees.get("dplus_m")) if avec_distance else None,
+        fc_moy=int(fc) if fc else None, rpe=rpe, note=(donnees.get("note") or "").strip() or None,
+    )
+    return importer_activite(a, analyser=analyser, douleur=donnees.get("douleur"),
+                             douleur_zone=donnees.get("douleur_zone"))
 
 
 def proposition_sport(seance: dict) -> Optional[dict]:
