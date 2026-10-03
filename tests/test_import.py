@@ -138,12 +138,11 @@ def test_type_inconnu():
     brut = json.dumps(data).encode()
 
     a = services.apercu_import(brut, "x.json")
-    assert a["demander_famille"] is True
-    with pytest.raises(services.ErreurImport):
-        services.importer_et_analyser(brut, "x.json")
+    assert a["sport_a_preciser"] is True
 
+    # Ancien paramètre famille (avant v5) : converti en sport et appris
     r = services.importer_et_analyser(brut, "x.json", famille="velo")
-    assert r["seance"]["famille"] == "velo"
+    assert r["seance"]["famille"] == "velo" and r["seance"]["sport_id"] == "velo_salle"
     assert db.activity_types()["999"] == "velo_salle"
 
 

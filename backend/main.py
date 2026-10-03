@@ -280,6 +280,7 @@ def api_import(fichier: UploadFile = File(...), options: str = Form("{}")):
     return services.importer_et_analyser(
         _lire(fichier), fichier.filename or "fichier.json",
         muscu_detail=opts.get("muscu_detail"),
+        sport_id=opts.get("sport_id") or None,
         famille=opts.get("famille") or None,
         sous_type=opts.get("sous_type") or None,
         analyser=opts.get("analyser", True) is not False,
@@ -312,6 +313,25 @@ def api_lier(id_: int, corps: dict = Body(...)):
 @app.post("/api/seances_realisees/{id_}/delier")
 def api_delier(id_: int):
     return services.delier(id_)
+
+
+@app.post("/api/seances_realisees/{id_}/sport")
+def api_preciser_sport(id_: int, corps: dict = Body(...)):
+    if not isinstance(corps.get("sport_id"), str):
+        raise HTTPException(422, "sport_id attendu.")
+    return services.preciser_sport(id_, corps["sport_id"], analyser=corps.get("analyser", True) is not False)
+
+
+@app.get("/api/correspondances")
+def api_correspondances():
+    return services.correspondances()
+
+
+@app.put("/api/correspondances/{source}/{code}")
+def api_corriger_correspondance(source: str, code: str, corps: dict = Body(...)):
+    if not isinstance(corps.get("sport_id"), str):
+        raise HTTPException(422, "sport_id attendu.")
+    return services.corriger_correspondance(source, code, corps["sport_id"], bool(corps.get("reaffecter")))
 
 
 @app.post("/api/analyses/{id_}/decision")

@@ -1,12 +1,9 @@
 """
 Extracteur de fichiers Suunto JSON (export DeviceLog).
 
-Validé sur les 5 types d'activité de l'athlète :
-  - Type 3  : course/trail outdoor (GPS)
-  - Type 93 : course tapis (pas de GPS, vitesse + cadence)
-  - Type 37 : squash
-  - Type 17 : vélo salle
-  - Type 23 : musculation
+Validé sur les 5 types d'activité de l'athlète (3 course outdoor, 93 tapis, 37 squash, 17 vélo salle,
+23 musculation). Le code ActivityType → sport du catalogue est lu dans la table activity_types
+(source 'suunto_json'), passée en paramètre : un code absent donne « autre » et une proposition.
 
 Points clés du format :
   - Structure : {"DeviceLog": {"Header": {...}, "Samples": [...], "Windows", "Device"}}
@@ -23,18 +20,8 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from typing import Optional
 
+import sports
 
-# ---------------------------------------------------------------------------
-# Table de correspondance ActivityType → famille d'activité
-# Complétée par l'utilisateur lors du premier import d'un type inconnu.
-# ---------------------------------------------------------------------------
-ACTIVITY_TYPE_MAP: dict[int, str] = {
-    3: "course_outdoor",
-    93: "course_tapis",
-    37: "squash",
-    17: "velo",
-    23: "muscu",
-}
 
 FAMILLE_COURSE = {"course_outdoor", "course_tapis"}
 
@@ -54,7 +41,7 @@ class SeanceExtraite:
 
     # Identité
     activity_type_code: int
-    famille: str                      # course_outdoor | course_tapis | squash | velo | muscu | inconnu
+    famille: str                      # ancienne famille, déduite du sport (sports.famille_heritee)
     date_debut: str                   # ISO 8601
     duree_s: float
     duree_min: float
@@ -93,6 +80,10 @@ class SeanceExtraite:
     sous_type: Optional[str] = None   # EF | intervals | cotes | tempo | sortie_longue | None
     confiance: Optional[float] = None
 
+    # Sport du catalogue ; code_connu = False → « autre » en attendant le choix de l'utilisateur
+    sport_id: str = sports.AUTRE
+    code_connu: bool = True
+
     def to_dict(self) -> dict:
         return asdict(self)
 
@@ -100,8 +91,9 @@ class SeanceExtraite:
 # ---------------------------------------------------------------------------
 # Extraction
 # ---------------------------------------------------------------------------
-def extraire(path_or_data) -> SeanceExtraite:
-    """Point d'entrée : accepte un chemin de fichier ou un dict déjà chargé."""
+def extraire(path_or_data, correspondances: Optional[dict[str, str]] = None) -> SeanceExtraite:
+    """Point d'entrée : accepte un chemin de fichier ou un dict déjà chargé.
+    correspondances : {code ActivityType (texte): sport_id}, lues dans activity_types."""
     if isinstance(path_or_data, (str, bytes)):
         with open(path_or_data, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -113,14 +105,14 @@ def extraire(path_or_data) -> SeanceExtraite:
     samples = dl.get("Samples", [])
 
     code = int(h.get("ActivityType", -1))
-    famille = ACTIVITY_TYPE_MAP.get(code, "inconnu")
+    sport_id = (correspondances or {}).get(str(code))
 
     duree_s = float(h.get("Duration") or 0)
     distance_m = float(h.get("Distance") or 0)
 
     seance = SeanceExtraite(
         activity_type_code=code,
-        famille=famille,
+        famille=sports.famille_heritee(sport_id or sports.AUTRE),
         date_debut=h.get("DateTime", ""),
         duree_s=duree_s,
         duree_min=round(duree_s / 60, 1),
@@ -157,11 +149,35 @@ def extraire(path_or_data) -> SeanceExtraite:
         seance.fc_min_bpm = round(min(hr_bpm))
         seance.temps_zones_s, seance.temps_zones_pct = _calculer_zones(samples)
 
-    # Détection fine pour la famille course
-    if famille in FAMILLE_COURSE:
-        seance.sous_type, seance.confiance = classify_course(seance)
-
+    appliquer_sport(seance, sport_id or sports.AUTRE)
+    seance.code_connu = sport_id is not None
     return seance
+
+
+def appliquer_sport(s: SeanceExtraite, sport_id: str) -> None:
+    """Sport choisi (correspondance ou utilisateur) : famille héritée et détection fine de la course."""
+    s.sport_id = sport_id
+    s.famille = sports.famille_heritee(sport_id)
+    s.sous_type, s.confiance = (None, None)
+    if sports.categorie(sport_id) == "course":
+        s.sous_type, s.confiance = classify_course(s)
+
+
+def deviner_sport(s: SeanceExtraite) -> Optional[dict]:
+    """Proposition pour un code inconnu, jamais validée seule : {sport_id, categorie} ou None.
+    Sans GPS, une séance cardio intense de 30 à 120 min évoque une raquette, sans sport précis."""
+    if s.a_gps:
+        dplus_km = (s.d_plus_m or 0) / s.distance_km if s.distance_km else 0
+        if s.distance_km > 3 and dplus_km > 25:
+            return {"sport_id": "trail", "categorie": "course"}
+        v = s.vitesse_moy_kmh or 0
+        if 6 <= v <= 16:
+            return {"sport_id": "course_route", "categorie": "course"}
+        if v > 16:
+            return {"sport_id": "velo_route", "categorie": "porte"}
+    elif 30 <= s.duree_min <= 120 and (s.fc_moy_bpm or 0) > 130:
+        return {"sport_id": None, "categorie": "raquette"}
+    return None
 
 
 def _round_or_none(v) -> Optional[float]:

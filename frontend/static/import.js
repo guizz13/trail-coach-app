@@ -19,7 +19,7 @@ async function traiter(fichiers) {
   const fd = new FormData();
   fichiers.forEach(f => fd.append("fichiers", f));
   try {
-    const [apercus, bruts] = await Promise.all([api("POST", "/api/import/apercu", fd), Promise.all(fichiers.map(lireJSON))]);
+    const [apercus, bruts] = await Promise.all([api("POST", "/api/import/apercu", fd), Promise.all(fichiers.map(lireJSON)), CATALOGUE_PRET]);
     attente.remove();
     apercus.map((a, i) => carte(a, fichiers[i], bruts[i])).reverse().forEach(c => zone.prepend(c));
   } catch (e) { erreurSimple(attente, e); }
@@ -66,26 +66,27 @@ function carte(a, fichier, brut) {
   if (a.erreur) { el.innerHTML = `<div class="seance-type">${esc(a.nom)}</div><div class="bandeau rouge">${esc(a.erreur)}</div>`; return el; }
   if (a.doublon) { el.innerHTML = `<div class="seance-type">${esc(a.nom)}</div><div class="bandeau gris">Déjà importé — ignoré</div>`; return el; }
 
-  const s = a.seance, disc = disciplineFamille(s.famille);
-  const estCourse = disc === "course";
+  const s = a.seance;
+  let sportChoisi = null;           // choix fait dès l'aperçu pour un code inconnu (sinon : après l'import)
+  const estCourse = sportInfo(s.sport_id).categorie === "course";
   const trace = s.a_gps && brut ? traceSuunto(brut) : null;
-  const titre = estCourse && s.sous_type && s.sous_type !== "inconnu" ? `${FAMILLES[s.famille]} · ${libelleType(s.sous_type)}` : FAMILLES[s.famille] || s.famille;
-  const typesFamille = a.familles.filter(f => f !== "inconnu");
+  const titreSport = id => id === s.sport_id && estCourse && s.sous_type && s.sous_type !== "inconnu"
+    ? `${sportInfo(id).libelle} · ${libelleType(s.sous_type)}` : sportInfo(id).libelle;
 
   el.innerHTML = `
-    <div class="seance" style="cursor:default">${iconeDisc(disc)}
-      <div class="seance-corps"><div class="seance-type">${esc(titre)}</div>
+    <div class="seance" style="cursor:default"><span data-icone>${iconeSport(s.sport_id)}</span>
+      <div class="seance-corps"><div class="seance-type" data-titre>${esc(a.sport_a_preciser ? "Sport à préciser" : titreSport(s.sport_id))}</div>
         <div class="seance-detail">${esc(dateFR(s.date_debut, { weekday: "long", day: "numeric", month: "long" }))} · ${esc(heure(s.date_debut))}</div></div>
       ${trace ? svgTrace(trace, 50, 35) : ""}
     </div>
     ${statsHTML(s, a.charge)}
     ${s.a_fc ? barreZones(zonesDepuisPct(s.temps_zones_pct)) : `<div class="bandeau gris">Pas de fréquence cardiaque dans ce fichier.</div>`}
     <form>
-      ${a.demander_famille ? `<div class="bandeau orange">Type d'activité ${s.activity_type_code} inconnu : choisir la discipline (mémorisée pour la suite).</div>
-        <label>Discipline</label><select name="famille" required><option value="">—</option>${typesFamille.map(f => `<option value="${f}">${esc(FAMILLES[f])}</option>`).join("")}</select>` : ""}
+      ${a.sport_a_preciser ? `<div class="bandeau orange">Code d'activité ${s.activity_type_code} inconnu : quel sport ? Le choix est mémorisé pour les prochains fichiers.</div>
+        <button type="button" class="badge orange" data-choisir style="margin-top:8px">Choisir le sport</button>` : ""}
       ${estCourse && a.demander_sous_type ? `<div class="bandeau orange">Type détecté : <b>${esc(libelleType(s.sous_type))}</b> — corriger ?</div>
         <select name="sous_type" style="margin-top:8px">${a.sous_types.map(t => `<option value="${t}" ${t === s.sous_type ? "selected" : ""}>${esc(libelleType(t))}</option>`).join("")}</select>` : ""}
-      ${s.famille === "muscu" ? formulaireMuscu(a) : ""}
+      ${s.sport_id === "muscu" ? formulaireMuscu(a) : ""}
       <details><summary><i class="ti ti-plus"></i> Signaler une douleur</summary>
         <div class="champs-2" style="margin-top:8px">
           <div><label>Douleur (0-10)</label><input type="number" name="douleur" min="0" max="10" inputmode="numeric"></div>
@@ -101,6 +102,15 @@ function carte(a, fichier, brut) {
   const libelleBouton = () => { bouton.textContent = $("#avec-llm").checked ? "Importer et analyser" : "Importer"; };
   libelleBouton();
   $("#avec-llm").addEventListener("change", libelleBouton);
+  const choisir = $("[data-choisir]", el);
+  if (choisir) choisir.onclick = async () => {
+    const id = await choisirSport({ propose: sportChoisi || a.proposition?.sport_id, categorie: a.proposition?.categorie });
+    if (!id) return;
+    sportChoisi = id;
+    $("[data-icone]", el).innerHTML = iconeSport(id);
+    $("[data-titre]", el).textContent = sportInfo(id).libelle;
+    choisir.textContent = "Changer";
+  };
   $$("[data-split] button", el).forEach(b => b.onclick = () => {
     $$("[data-split] button", el).forEach(x => x.classList.toggle("actif", x === b));
   });
@@ -109,10 +119,10 @@ function carte(a, fichier, brut) {
     e.preventDefault();
     const fd = new FormData(form);
     const opts = { analyser: $("#avec-llm").checked };
-    if (fd.get("famille")) opts.famille = fd.get("famille");
+    if (sportChoisi) opts.sport_id = sportChoisi;
     if (fd.get("sous_type")) opts.sous_type = fd.get("sous_type");
     if (fd.get("douleur") !== null && fd.get("douleur") !== "") { opts.douleur = Number(fd.get("douleur")); opts.douleur_zone = fd.get("douleur_zone") || null; }
-    if (s.famille === "muscu") {
+    if (s.sport_id === "muscu") {
       opts.muscu_detail = {
         split: $("[data-split] .actif", el)?.dataset.v || a.split_propose,
         groupes: fd.getAll("groupes"),
@@ -141,6 +151,7 @@ function carte(a, fichier, brut) {
 
 function afficherResultat(el, r, analyseDemandee) {
   if (r.doublon) { el.innerHTML = `<div class="bandeau gris">Déjà importé — ignoré</div>`; return; }
+  if (r.sport_a_preciser) { sportAPreciser(el, r, analyseDemandee); return; }
   const a = r.analyse_llm, acwr = r.indicateurs.acwr;
   const signaux = (r.indicateurs.signaux || []).map(s => `<li>${esc(s.detail)}</li>`).join("");
   const appliques = Object.fromEntries((r.ajustements_appliques || []).map(x => [x.jour + x.seance_proposee, x]));
@@ -174,4 +185,22 @@ function afficherResultat(el, r, analyseDemandee) {
       zone.innerHTML = `<div class="bandeau ${d.accepte ? "vert" : "gris"}">${d.accepte ? "Ajustements appliqués au planning." : "Plan initial conservé."}</div>`;
     } catch (e) { erreurSimple(zone, e); }
   });
+}
+
+// Code inconnu importé sans choix : séance enregistrée en « autre », analyse suspendue jusqu'au choix
+function sportAPreciser(el, r, analyseDemandee) {
+  el.innerHTML = `<div class="bandeau orange">Séance enregistrée. Le coach l'analysera une fois le sport précisé.</div>
+    <button type="button" class="badge orange" data-preciser style="margin-top:8px">Sport à préciser</button>`;
+  const ouvrir = async () => {
+    const id = await choisirSport({ propose: r.proposition?.sport_id, categorie: r.proposition?.categorie,
+      sousTitre: "Mémorisé pour les prochains fichiers avec ce code." });
+    if (!id) return;
+    if (analyseDemandee) chargeurIA(el, MESSAGES_ANALYSE); else reflexion(el, "Enregistrement…");
+    try {
+      const res = await api("POST", `/api/seances_realisees/${r.seance.id}/sport`, { sport_id: id, analyser: analyseDemandee });
+      afficherResultat(el, res, analyseDemandee);
+    } catch (e) { erreurSimple(el, e); }
+  };
+  $("[data-preciser]", el).onclick = ouvrir;
+  ouvrir();
 }

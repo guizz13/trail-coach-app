@@ -292,7 +292,7 @@ function feuille(html) {
     document.body.appendChild(d);
   }
   d.innerHTML = `<div class="poignee"></div>${html}`;
-  d.showModal();
+  if (!d.open) d.showModal();          // une feuille peut en remplacer une autre (sélecteur de sport)
   return d;
 }
 

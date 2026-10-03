@@ -136,7 +136,7 @@ def hash_fichier(fichier_bytes: bytes) -> str:
     return hashlib.sha256(fichier_bytes).hexdigest()
 
 
-def _extraire(fichier_bytes: bytes, famille: Optional[str] = None,
+def _extraire(fichier_bytes: bytes, sport_id: Optional[str] = None,
               sous_type: Optional[str] = None) -> tuple[extractor.SeanceExtraite, bool]:
     """Extraction + corrections utilisateur. Retourne (séance, sous_type_confirme)."""
     try:
@@ -146,23 +146,17 @@ def _extraire(fichier_bytes: bytes, famille: Optional[str] = None,
     if not isinstance(data, dict) or "DeviceLog" not in data:
         raise ErreurImport("Format inattendu : clé 'DeviceLog' absente (export Suunto attendu).")
 
-    # Types d'activité ajoutés depuis l'UI (table activity_types)
-    extractor.ACTIVITY_TYPE_MAP.update({int(c): sports.famille_heritee(sid)
-                                        for c, sid in db.activity_types().items() if c.isdigit()})
     try:
-        s = extractor.extraire(data)
+        s = extractor.extraire(data, db.activity_types("suunto_json"))
     except (KeyError, TypeError, ValueError) as e:
         raise ErreurImport(f"Extraction impossible : {e}") from e
     if not s.date_debut:
         raise ErreurImport("Date de début absente du fichier.")
 
-    if famille and famille != s.famille:
-        if famille not in FAMILLES:
-            raise ErreurImport(f"Famille inconnue : {famille}")
-        s.famille = famille
-        s.sous_type, s.confiance = (None, None)
-        if famille in extractor.FAMILLE_COURSE:
-            s.sous_type, s.confiance = extractor.classify_course(s)
+    if sport_id and sport_id != s.sport_id:
+        if sport_id not in sports.SPORTS_PAR_ID:
+            raise ErreurImport(f"Sport inconnu : {sport_id}")
+        extractor.appliquer_sport(s, sport_id)
 
     confirme = False
     if sous_type and s.famille in extractor.FAMILLE_COURSE:
@@ -189,10 +183,10 @@ def apercu_import(fichier_bytes: bytes, nom: str) -> dict:
         "doublon": False,
         "seance": d,
         "charge": round(metrics.charge_seance(d), 1),
-        "demander_famille": s.famille == "inconnu",
+        "sport_a_preciser": not s.code_connu,
+        "proposition": extractor.deviner_sport(s) if not s.code_connu else None,
         "demander_sous_type": s.famille in extractor.FAMILLE_COURSE and (s.confiance or 0) < SEUIL_CONFIANCE,
-        "split_propose": split_propose() if s.famille == "muscu" else None,
-        "familles": FAMILLES,
+        "split_propose": split_propose() if s.sport_id == "muscu" else None,
         "sous_types": SOUS_TYPES_COURSE,
         "groupes_muscu": GROUPES_MUSCU,
         "splits_muscu": SPLITS_MUSCU,
@@ -201,13 +195,14 @@ def apercu_import(fichier_bytes: bytes, nom: str) -> dict:
 
 def _ligne_seance(s: extractor.SeanceExtraite, h: str, nom: str, confirme: bool) -> dict:
     d = s.to_dict()
+    d.pop("sport_id"), d.pop("code_connu")
     return {
         "fichier_hash": h,
         "fichier_nom": nom,
         "activity_type_code": s.activity_type_code,
         "famille": s.famille,
-        "sport_id": db.activity_types().get(str(s.activity_type_code))
-                    or sports.SPORT_DEPUIS_FAMILLE.get(s.famille, "autre"),
+        "sport_id": s.sport_id,
+        "sport_a_preciser": int(not s.code_connu),
         "source": "suunto_json",
         "source_id": h,
         "source_code": str(s.activity_type_code),
@@ -575,9 +570,12 @@ def acwr_dict(a: metrics.ACWR) -> dict:
 # Import : pipeline complet
 # ---------------------------------------------------------------------------
 def importer_et_analyser(fichier_bytes: bytes, nom: str, muscu_detail: Optional[dict] = None,
-                         famille: Optional[str] = None, sous_type: Optional[str] = None,
+                         sport_id: Optional[str] = None, sous_type: Optional[str] = None,
                          analyser: bool = True, douleur: Optional[int] = None,
-                         douleur_zone: Optional[str] = None) -> dict:
+                         douleur_zone: Optional[str] = None, famille: Optional[str] = None) -> dict:
+    """Un code ActivityType inconnu ne fait jamais échouer l'import : la séance est enregistrée en
+    « autre », marquée sport_a_preciser, et l'analyse LLM attend le choix du sport (preciser_sport).
+    famille : ancien paramètre (avant v5), converti en sport."""
     # 1. Hash, anti-doublon
     h = hash_fichier(fichier_bytes)
     existant = db.seance_par_hash(h)
@@ -586,11 +584,15 @@ def importer_et_analyser(fichier_bytes: bytes, nom: str, muscu_detail: Optional[
                 "message": f"Fichier déjà importé (séance #{existant['id']})."}
 
     # 2. Extraction → seances_realisees
-    s, confirme = _extraire(fichier_bytes, famille, sous_type)
-    if s.famille == "inconnu":
-        raise ErreurImport(f"Type d'activité {s.activity_type_code} inconnu : préciser la famille.")
-    if famille:
-        db.enregistrer_activity_type(s.activity_type_code, sports.SPORT_DEPUIS_FAMILLE.get(s.famille, "autre"))
+    if famille and not sport_id:
+        if famille not in FAMILLES:
+            raise ErreurImport(f"Famille inconnue : {famille}")
+        sport_id = sports.SPORT_DEPUIS_FAMILLE[famille]
+    s, confirme = _extraire(fichier_bytes, sport_id, sous_type)
+    if sport_id and not s.code_connu:
+        # Choix fait dès l'aperçu : le code est appris pour les prochains fichiers
+        db.enregistrer_activity_type(s.activity_type_code, sport_id, "suunto_json")
+        s.code_connu = True
 
     ligne = _ligne_seance(s, h, nom, confirme)
     if douleur not in (None, ""):
@@ -602,12 +604,18 @@ def importer_et_analyser(fichier_bytes: bytes, nom: str, muscu_detail: Optional[
         with db.connexion() as c:
             seance_id = db.inserer("seances_realisees", ligne, conn=c)
             # 3. Détail muscu
-            if s.famille == "muscu" and muscu_detail:
+            if s.sport_id == "muscu" and muscu_detail:
                 db.inserer("muscu_detail", {"seance_id": seance_id, **_valider_muscu(muscu_detail)}, conn=c)
     except sqlite3.IntegrityError:
         existant = db.seance_par_hash(h)
         return {"doublon": True, "seance_id": existant["id"] if existant else None,
                 "message": "Fichier déjà importé."}
+    return analyser_seance(seance_id, analyser, confirme)
+
+
+def analyser_seance(seance_id: int, analyser: bool = True, confirme: bool = False) -> dict:
+    """Étapes 4 à 12 de l'import, pour une séance déjà enregistrée (fichier, saisie manuelle,
+    ou sport précisé après coup). Pas d'analyse LLM tant que le sport reste à préciser."""
     # 4 et 10. Liaison au prévu (même jour, même famille) et statuts de la semaine
     d = date_de(db.seance(seance_id)["date_debut"])
     recalculer_semaine(lundi_de(d))
@@ -626,11 +634,11 @@ def importer_et_analyser(fichier_bytes: bytes, nom: str, muscu_detail: Optional[
 
     # 8-9. Analyse LLM, tracée dans analyses_llm
     reponse, erreur, analyse_id = None, None, None
-    if analyser:
+    if analyser and not seance["sport_a_preciser"]:
         lundi = lundi_de(d)
         reste = [_planifiee_llm(p) for p in db.planifiees_entre(d.isoformat(), (lundi + timedelta(days=6)).isoformat())]
         seance_llm = _seance_llm(seance)
-        if s.famille == "muscu":
+        if seance["sport_id"] == "muscu":
             seance_llm["muscu_detail"] = db.muscu_detail(seance_id)
         p = db.profil()
         reponse, erreur, trace = _appel_llm(
@@ -644,8 +652,9 @@ def importer_et_analyser(fichier_bytes: bytes, nom: str, muscu_detail: Optional[
     db.maj("seances_realisees", seance_id, {"verdict": verdict})
 
     # Niveau 3 de classification : le LLM tranche un sous-type incertain
-    if reponse and s.famille in extractor.FAMILLE_COURSE and not confirme \
-            and (s.confiance or 0) < SEUIL_CONFIANCE and reponse.get("type_detecte") in SOUS_TYPES_COURSE:
+    if reponse and seance["famille"] in extractor.FAMILLE_COURSE and not confirme \
+            and (seance["sous_type_confiance"] or 0) < SEUIL_CONFIANCE \
+            and reponse.get("type_detecte") in SOUS_TYPES_COURSE:
         db.maj("seances_realisees", seance_id, {"sous_type": reponse["type_detecte"], "sous_type_confirme": 1})
         seance = db.seance(seance_id)
 
@@ -660,6 +669,8 @@ def importer_et_analyser(fichier_bytes: bytes, nom: str, muscu_detail: Optional[
     return {
         "doublon": False,
         "seance": _seance_publique(seance),
+        "sport_a_preciser": bool(seance["sport_a_preciser"]),
+        "proposition": proposition_sport(seance) if seance["sport_a_preciser"] else None,
         "prevu": prevu,
         "verdict": verdict,
         "indicateurs": {**indicateurs, "acwr": acwr_dict(acwr)},   # affichage seulement
@@ -670,6 +681,80 @@ def importer_et_analyser(fichier_bytes: bytes, nom: str, muscu_detail: Optional[
         "ajustements_appliques": appliques,
         "validation_requise": validation_requise,
     }
+
+
+def proposition_sport(seance: dict) -> Optional[dict]:
+    brut = seance.get("donnees_brutes")
+    if not isinstance(brut, dict):
+        return None
+    champs = extractor.SeanceExtraite.__dataclass_fields__
+    return extractor.deviner_sport(extractor.SeanceExtraite(**{k: v for k, v in brut.items() if k in champs}))
+
+
+# ---------------------------------------------------------------------------
+# Sport à préciser, correspondances apprises (activity_types)
+# ---------------------------------------------------------------------------
+def _sport_valide(sport_id: str) -> str:
+    if sport_id not in sports.SPORTS_PAR_ID:
+        raise ValueError(f"Sport inconnu : {sport_id}")
+    return sport_id
+
+
+def _changer_sport(seance: dict, sport_id: str) -> None:
+    """Sport d'une séance existante : famille héritée, sous-type de course recalculé si besoin."""
+    maj = {"sport_id": sport_id, "famille": sports.famille_heritee(sport_id), "sport_a_preciser": 0}
+    if sports.categorie(sport_id) != "course":
+        maj.update(sous_type=None, sous_type_confiance=None, sous_type_confirme=0)
+    elif not seance.get("sous_type") or sports.categorie(sports.sport_de(seance)) != "course":
+        brut = seance.get("donnees_brutes") if isinstance(seance.get("donnees_brutes"), dict) else {}
+        champs = extractor.SeanceExtraite.__dataclass_fields__
+        try:
+            st, conf = extractor.classify_course(extractor.SeanceExtraite(**{k: v for k, v in brut.items() if k in champs}))
+        except TypeError:          # séance manuelle : pas de données brutes
+            st, conf = None, None
+        maj.update(sous_type=None if st == "inconnu" else st, sous_type_confiance=conf, sous_type_confirme=0)
+    db.maj("seances_realisees", seance["id"], maj)
+
+
+def preciser_sport(seance_id: int, sport_id: str, analyser: bool = True) -> dict:
+    """Choix du sport d'une séance (bottom sheet « Quel sport ? »). Pour un fichier, le code reçu est
+    appris : les séances en attente avec ce code et les prochains fichiers le reprennent."""
+    s = _seance_ou_erreur(seance_id)
+    _sport_valide(sport_id)
+    a_preciser = bool(s["sport_a_preciser"])
+    if s["source"] in ("suunto_json", "strava") and s["source_code"]:
+        db.enregistrer_activity_type(s["source_code"], sport_id, s["source"])
+        for autre in db.fetch_all("SELECT * FROM seances_realisees WHERE source = ? AND source_code = ? "
+                                  "AND sport_a_preciser = 1 AND id != ?", (s["source"], s["source_code"], seance_id)):
+            _changer_sport(autre, sport_id)
+            recalculer_semaine(lundi_de(date_de(autre["date_debut"])))
+    _changer_sport(s, sport_id)
+    # Première précision : l'analyse qui avait été suspendue est lancée
+    if a_preciser:
+        return analyser_seance(seance_id, analyser)
+    recalculer_semaine(lundi_de(date_de(s["date_debut"])))
+    return {"seance": _seance_publique(db.seance(seance_id))}
+
+
+def correspondances() -> list[dict]:
+    """Codes appris par source, avec le nombre de séances importées sous chaque code."""
+    comptes = {(r["source"], r["source_code"]): r["n"] for r in db.fetch_all(
+        "SELECT source, source_code, COUNT(*) AS n FROM seances_realisees GROUP BY source, source_code")}
+    return [{**c, "libelle": sports.sport(c["sport_id"])["libelle"], "confirme": bool(c["confirme"]),
+             "seances": comptes.get((c["source"], c["code"]), 0)} for c in db.correspondances()]
+
+
+def corriger_correspondance(source: str, code: str, sport_id: str, reaffecter: bool = False) -> dict:
+    """Corrige un code appris ; reaffecter=True change aussi le sport des séances déjà importées."""
+    _sport_valide(sport_id)
+    db.enregistrer_activity_type(code, sport_id, source)
+    seances_code = db.fetch_all("SELECT * FROM seances_realisees WHERE source = ? AND source_code = ?", (source, code))
+    a_changer = [x for x in seances_code if reaffecter or x["sport_a_preciser"]]
+    for x in a_changer:
+        _changer_sport(x, sport_id)
+    for lundi in sorted({lundi_de(date_de(x["date_debut"])) for x in a_changer}):
+        recalculer_semaine(lundi)
+    return {"code": code, "source": source, "sport_id": sport_id, "seances_reaffectees": len(a_changer)}
 
 
 # ---------------------------------------------------------------------------
@@ -727,7 +812,8 @@ def _seance_publique(s: dict) -> dict:
 def sports_recents(n: int = 6) -> list[str]:
     """Les n derniers sports utilisés (séances réalisées, plus récentes d'abord)."""
     vus = []
-    for r in db.fetch_all("SELECT * FROM seances_realisees ORDER BY date_debut DESC LIMIT 200"):
+    for r in db.fetch_all("SELECT * FROM seances_realisees WHERE sport_a_preciser = 0 "
+                          "ORDER BY date_debut DESC LIMIT 200"):
         sid = sports.sport_de(r)
         if sid not in vus:
             vus.append(sid)

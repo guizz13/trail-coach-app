@@ -215,6 +215,34 @@ $("#recalculer").onclick = async () => {
   finally { b.disabled = false; }
 };
 
+// ---- Codes d'activité appris (Suunto, Strava) → sport du catalogue ------------------------------------
+const SOURCES = { suunto_json: "Suunto", strava: "Strava" };
+$("#correspondances").onclick = () => feuilleCorrespondances();
+
+async function feuilleCorrespondances() {
+  const d = feuille(`<h2>Codes d'activité appris</h2>
+    <p class="secondaire" style="margin:0 0 10px">Code reçu de la montre → sport. Toucher une ligne pour corriger.</p><div id="corr"></div>`);
+  const zone = $("#corr", d);
+  try {
+    const [liste] = await Promise.all([api("GET", "/api/correspondances"), CATALOGUE_PRET]);
+    zone.innerHTML = liste.map(c => `<button type="button" class="picker-sport" data-source="${esc(c.source)}" data-code="${esc(c.code)}" data-n="${c.seances}">
+        ${iconeSport(c.sport_id)}<span>${esc(SOURCES[c.source] || c.source)} ${esc(c.code)} → <b>${esc(c.libelle)}</b>
+        <span class="sous-texte">${c.seances} séance${c.seances > 1 ? "s" : ""}</span></span><i class="ti ti-pencil muted"></i></button>`).join("")
+      || `<div class="vide">Aucun code appris.</div>`;
+    $$("[data-code]", zone).forEach(b => b.onclick = async () => {
+      const { source, code } = b.dataset, n = Number(b.dataset.n);
+      const id = await choisirSport({ titre: `Code ${code} : quel sport ?` });
+      if (!id) return feuilleCorrespondances();
+      const reaffecter = n > 0 && confirm(`Réaffecter aussi les ${n} séance(s) déjà importée(s) avec ce code à « ${sportInfo(id).libelle} » ?`);
+      try {
+        await api("PUT", `/api/correspondances/${encodeURIComponent(source)}/${encodeURIComponent(code)}`, { sport_id: id, reaffecter });
+        if (reaffecter) await charger();
+      } catch (e) { alert(e.message); }
+      feuilleCorrespondances();
+    });
+  } catch (e) { erreurSimple(zone, e); }
+}
+
 // ---- Liaison réalisé ↔ prévu (dans le détail d'une séance) ---------------------------------------------
 const libellePrevu = p => `${libelleType(p.type)} (${dateFR(p.date_seance, { weekday: "short" })} ${CRENEAUX[p.creneau] || p.creneau})`;
 
