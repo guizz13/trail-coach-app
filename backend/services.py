@@ -1491,8 +1491,13 @@ def _tracer(type_appel: str, reponse: Optional[dict], erreur: Optional[dict], tr
 
 
 def _seance_llm(s: dict) -> dict:
-    exclus = {"donnees_brutes", "fichier_hash", "fichier_nom", "importe_le"}
-    return {k: v for k, v in s.items() if k not in exclus}
+    """Séance réalisée pour le LLM : sport, catégorie, impact, RPE et source explicites."""
+    exclus = {"donnees_brutes", "fichier_hash", "fichier_nom", "importe_le", "sport_id", "source_id"}
+    sid = sports.sport_de(s)
+    return {"sport": sports.sport(sid)["libelle"] + (" (à préciser)" if s.get("sport_a_preciser") else ""),
+            "categorie": sports.categorie(sid), "impact": sports.impact(sid),
+            "rpe": s.get("rpe"), "source": s.get("source") or "suunto_json",
+            **{k: v for k, v in s.items() if k not in exclus}}
 
 
 def _planifiee_llm(p: dict) -> dict:
@@ -1514,15 +1519,18 @@ def resume_semaines(nb: int, avant_lundi: date) -> list[dict]:
         dimanche = lundi + timedelta(days=6)
         seances = db.seances_entre(lundi.isoformat(), dimanche.isoformat())
         course = [s for s in seances if s["famille"] in extractor.FAMILLE_COURSE]
-        par_famille: dict[str, int] = {}
+        par_sport: dict[str, int] = {}
         for s in seances:
-            par_famille[s["famille"]] = par_famille.get(s["famille"], 0) + 1
+            libelle = sports.sport(sports.sport_de(s))["libelle"]
+            par_sport[libelle] = par_sport.get(libelle, 0) + 1
         out.append({
             "semaine_du": lundi.isoformat(),
             "volume_course_km": round(sum(s["distance_km"] or 0 for s in course), 2),
             "d_plus_m": round(sum(s["dplus_m"] or 0 for s in course)),
             "charge": round(metrics.charge_semaine(seances), 1),
-            "seances_par_famille": par_famille,
+            "seances_par_sport": par_sport,
+            "jours_impact_eleve": len({s["date_debut"][:10] for s in seances
+                                       if sports.impact(sports.sport_de(s)) == "eleve"}),
             "distribution_zones": metrics.distribution_hebdo(course),
             "acwr": acwr_au(dimanche).ratio,
         })
