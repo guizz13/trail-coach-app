@@ -89,6 +89,8 @@ COLONNES_AJOUTEES = [
     ("seances_realisees", "rpe", "INTEGER"),             # 1-10, saisi par l'utilisateur
     ("seances_realisees", "note", "TEXT"),
     ("seances_realisees", "sport_a_preciser", "INTEGER NOT NULL DEFAULT 0"),
+    # v5 semaine réelle : date réalisée − date prévue de la séance liée (+ reportée, − avancée)
+    ("seances_realisees", "decalage_jours", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 
@@ -114,6 +116,7 @@ def migrer(c: sqlite3.Connection) -> None:
         _remplir_sports(c)
     c.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_realisees_source ON seances_realisees(source, source_id)")
     _elargir_types_appel(c)
+    _elargir_statuts_planifiees(c)
 
 
 def _migrer_activity_types(c: sqlite3.Connection) -> None:
@@ -191,6 +194,25 @@ def _elargir_types_appel(c: sqlite3.Connection) -> None:
     c.execute(sql.replace("'reconstruction_evenements')", "'reconstruction_evenements','ajustement_semaine')"))
     c.execute(f"INSERT INTO analyses_llm ({colonnes}) SELECT {colonnes} FROM analyses_llm_ancienne")
     c.execute("DROP TABLE analyses_llm_ancienne")
+
+
+def _elargir_statuts_planifiees(c: sqlite3.Connection) -> None:
+    """Statuts « decale » et « remplacee » (v5) : SQLite ne modifie pas une contrainte CHECK, la table
+    est reconstruite. On ne renomme pas l'ancienne table : avec foreign_keys=ON, SQLite réécrirait
+    la clé étrangère de remplacements vers elle. Nouvelle table → copie → suppression de l'ancienne
+    (remplacements est encore vide à ce stade) → renommage de la nouvelle."""
+    sql = c.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'seances_planifiees'").fetchone()[0]
+    if "'decale'" in sql:
+        return
+    colonnes = ", ".join(r[1] for r in c.execute("PRAGMA table_info(seances_planifiees)"))
+    nouvelle = sql.replace("'modifie')", "'modifie','decale','remplacee')")
+    nouvelle = nouvelle.replace("seances_planifiees", "seances_planifiees_v5", 1)
+    c.execute("DROP TABLE IF EXISTS seances_planifiees_v5")
+    c.execute(nouvelle)
+    c.execute(f"INSERT INTO seances_planifiees_v5 ({colonnes}) SELECT {colonnes} FROM seances_planifiees")
+    c.execute("DROP TABLE seances_planifiees")
+    c.execute("ALTER TABLE seances_planifiees_v5 RENAME TO seances_planifiees")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_planifiees_date ON seances_planifiees(date_seance)")
 
 
 # ---------------------------------------------------------------------------
@@ -355,6 +377,10 @@ def muscu_detail(seance_id: int) -> Optional[dict]:
 # ---------------------------------------------------------------------------
 # Séances planifiées
 # ---------------------------------------------------------------------------
+def planifiees_remplacees() -> set[int]:
+    return {r["seance_planifiee_id"] for r in fetch_all("SELECT seance_planifiee_id FROM remplacements")}
+
+
 def planifiees_entre(du: str, au: str) -> list[dict]:
     return fetch_all(
         "SELECT * FROM seances_planifiees WHERE date_seance BETWEEN ? AND ? "

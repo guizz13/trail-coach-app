@@ -41,7 +41,7 @@ def test_deplacer_la_muscu_relie_immediatement():
     muscu_p = planifier("2026-09-30", "muscu_push")          # prévue mercredi
     muscu = realisee("2026-10-01T08:00:00+02:00", "muscu")   # faite jeudi
     services.recalculer_semaine(LUNDI)
-    assert db.planifiee(muscu_p)["statut"] == "manque"
+    assert db.planifiee(muscu_p)["statut"] == "decale"          # report d'un jour (complément v5)
 
     r = services.modifier_planifiee(muscu_p, {"date_seance": "2026-10-01"})
     assert r["seance"]["seance_realisee_id"] == muscu and r["seance"]["statut"] == "realise"

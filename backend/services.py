@@ -324,39 +324,64 @@ def _nombre(v) -> Optional[float]:
 # ---------------------------------------------------------------------------
 # Import : contexte (prévu, ACWR, prochaine qualité)
 # ---------------------------------------------------------------------------
+DECALAGE_MAX_JOURS = 2
+
+
 def relier(du: date, au: date) -> None:
-    """Liaison automatique sur [du, au] : libère les liens automatiques puis relie chaque séance
-    réalisée (ordre chronologique) à une séance prévue du même jour et de la même famille.
-    Une séance avec lien_manuel=1 n'est jamais touchée."""
+    """Liaison automatique sur une semaine [du, au] : libère les liens automatiques, puis
+    1. relie chaque séance réalisée à une séance prévue du même jour et de la même catégorie ;
+    2. pour celles restées sans prévu : séance décalée, même catégorie, même semaine, à 2 jours au
+       plus, d'abord une séance prévue passée (report, la plus proche), puis future (avance).
+    Les séances prévues remplacées sont ignorées. Une séance avec lien_manuel=1 n'est jamais touchée."""
     with db.connexion() as c:
         c.execute(
             "UPDATE seances_planifiees SET seance_realisee_id = NULL WHERE date_seance BETWEEN ? AND ? "
             "AND seance_realisee_id IN (SELECT id FROM seances_realisees WHERE lien_manuel = 0)",
             (du.isoformat(), au.isoformat()))
-    plan = db.planifiees_entre(du.isoformat(), au.isoformat())
+        c.execute("UPDATE seances_realisees SET decalage_jours = 0 WHERE lien_manuel = 0 "
+                  "AND substr(date_debut, 1, 10) BETWEEN ? AND ?", (du.isoformat(), au.isoformat()))
+    remplacees = db.planifiees_remplacees()
+    plan = [p for p in db.planifiees_entre(du.isoformat(), au.isoformat()) if p["id"] not in remplacees]
+    libres = lambda cat: [p for p in plan if p["seance_realisee_id"] is None and cat
+                          and categorie_planifiee(p["type"]) == cat]
+    sans_prevu = []
     for s in db.seances_entre(du.isoformat(), au.isoformat()):
         if s["lien_manuel"]:
             continue
         debut = en_paris(s["date_debut"])
-        cat = categorie_realisee(s)
-        candidats = [p for p in plan if p["date_seance"] == debut.date().isoformat()
-                     and p["seance_realisee_id"] is None and cat and categorie_planifiee(p["type"]) == cat]
+        candidats = [p for p in libres(categorie_realisee(s)) if p["date_seance"] == debut.date().isoformat()]
         if not candidats:
-            continue          # hors plan : jamais de liaison automatique sur une autre date
+            sans_prevu.append(s)
+            continue
         rang = rang_creneau_realise(debut)
         choisi = min(candidats, key=lambda p: (abs(RANG_CRENEAU.get(p["creneau"], 2) - rang),
                                                 RANG_CRENEAU.get(p["creneau"], 2)))
         choisi["seance_realisee_id"] = s["id"]
         db.maj("seances_planifiees", choisi["id"], {"seance_realisee_id": s["id"]})
+    for s in sans_prevu:
+        jour = date_de(s["date_debut"])
+        ecart = lambda p: (jour - date.fromisoformat(p["date_seance"])).days
+        candidats = [p for p in libres(categorie_realisee(s)) if 0 < abs(ecart(p)) <= DECALAGE_MAX_JOURS]
+        if not candidats:
+            continue          # hors plan
+        choisi = min(candidats, key=lambda p: (ecart(p) < 0, abs(ecart(p))))    # report avant avance
+        choisi["seance_realisee_id"] = s["id"]
+        db.maj("seances_planifiees", choisi["id"], {"seance_realisee_id": s["id"]})
+        db.maj("seances_realisees", s["id"], {"decalage_jours": ecart(choisi)})
 
 
 def mettre_a_jour_statuts(du: date, au: date) -> None:
-    """realise si une séance y est liée ; manque si la date est passée (aujourd'hui ne l'est jamais) ;
-    sinon prévu (ou modifié si elle l'était). Un repos n'est jamais manqué."""
+    """realise si une séance y est liée le même jour, decale si elle est liée à une séance d'un autre
+    jour, remplacee si une séance d'un autre sport la remplace ; manque si la date est passée
+    (aujourd'hui ne l'est jamais) ; sinon prévu (ou modifié si elle l'était). Un repos n'est jamais manqué."""
     jour = aujourdhui().isoformat()
+    remplacees = db.planifiees_remplacees()
     for p in db.planifiees_entre(du.isoformat(), au.isoformat()):
         if p["seance_realisee_id"]:
-            statut = "realise"
+            r = db.seance(p["seance_realisee_id"])
+            statut = "decale" if r and r["date_debut"][:10] != p["date_seance"] else "realise"
+        elif p["id"] in remplacees:
+            statut = "remplacee"
         elif p["type"] != "repos" and p["date_seance"] < jour:
             statut = "manque"
         else:
@@ -575,10 +600,11 @@ def lier(seance_id: int, planifiee_id: int) -> dict:
         raise ValueError("Liaison refusée : la séance prévue n'est pas dans la même semaine.")
     if p["seance_realisee_id"] not in (None, seance_id):
         raise ValueError("Cette séance prévue est déjà liée à une autre séance réalisée.")
+    decalage = (date_de(s["date_debut"]) - date.fromisoformat(p["date_seance"])).days
     with db.connexion() as c:
         c.execute("UPDATE seances_planifiees SET seance_realisee_id = NULL WHERE seance_realisee_id = ?", (seance_id,))
         c.execute("UPDATE seances_planifiees SET seance_realisee_id = ? WHERE id = ?", (seance_id, planifiee_id))
-        c.execute("UPDATE seances_realisees SET lien_manuel = 1 WHERE id = ?", (seance_id,))
+        c.execute("UPDATE seances_realisees SET lien_manuel = 1, decalage_jours = ? WHERE id = ?", (decalage, seance_id))
     recalculer_semaine(lundi)
     return detail_seance(seance_id)
 
@@ -588,7 +614,7 @@ def delier(seance_id: int) -> dict:
     with db.connexion() as c:
         c.execute("UPDATE seances_planifiees SET seance_realisee_id = NULL WHERE seance_realisee_id = ?", (seance_id,))
         # lien_manuel=1 : la liaison automatique ne la recollera pas
-        c.execute("UPDATE seances_realisees SET lien_manuel = 1 WHERE id = ?", (seance_id,))
+        c.execute("UPDATE seances_realisees SET lien_manuel = 1, decalage_jours = 0 WHERE id = ?", (seance_id,))
     recalculer_semaine(lundi_de(date_de(s["date_debut"])))
     return detail_seance(seance_id)
 
@@ -987,8 +1013,12 @@ recalculer_verdicts = recalculer_tout      # nom historique de la route admin
 
 
 def _seance_publique(s: dict) -> dict:
-    """Séance sans le JSON brut (volumineux et redondant)."""
-    return {k: v for k, v in s.items() if k != "donnees_brutes"}
+    """Séance sans le JSON brut (volumineux et redondant), avec la date prévue si elle a été
+    décalée (« Prévue samedi »)."""
+    out = {k: v for k, v in s.items() if k != "donnees_brutes"}
+    if s.get("decalage_jours"):
+        out["prevue_le"] = (date_de(s["date_debut"]) - timedelta(days=s["decalage_jours"])).isoformat()
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1396,7 +1426,7 @@ def valider_evenement(e: dict) -> dict:
 # Séances planifiées (édition manuelle)
 # ---------------------------------------------------------------------------
 CRENEAUX = ("matin", "midi", "soir", "journee")
-STATUTS = ("prevu", "realise", "manque", "modifie")
+STATUTS = ("prevu", "realise", "manque", "modifie", "decale", "remplacee")
 
 
 def normaliser_creneau(c: Optional[str]) -> str:

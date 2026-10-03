@@ -54,7 +54,7 @@ const FAMILLES = {
   course_outdoor: "Course", course_tapis: "Course sur tapis", squash: "Squash", velo: "Vélo",
   muscu: "Musculation", autre: "Autre", inconnu: "Inconnu",
 };
-const STATUTS = { prevu: "À faire", realise: "Fait", manque: "Manqué", modifie: "Modifié" };
+const STATUTS = { prevu: "À faire", realise: "Fait", manque: "Manqué", modifie: "Modifié", decale: "Décalée", remplacee: "Remplacée" };
 const VERDICTS = { vert: "conforme", orange: "écart", rouge: "alerte", hors_plan: "hors plan" };
 // Zones de santé (statut Vigilance / Blessure, douleur déclarée)
 const ZONES_SANTE = ["Achille G", "Achille D", "Fascia G", "Fascia D", "Mollet G", "Mollet D",
@@ -464,19 +464,20 @@ function graphCourbe(conteneur, points, opts = {}) {
 // Séance (carte) — partagée entre Semaine et Préparer
 // ---------------------------------------------------------------------------
 // p : séance planifiée ; r : séance réalisée liée (facultative) ; verdict facultatif
-function seanceHTML(p, r, verdict) {
+// opts : { statut (libellé remplaçant celui du statut), mention (détail d'une séance réalisée) }
+function seanceHTML(p, r, verdict, opts = {}) {
   const icone = r ? iconeSport(r.sport_id) : estSport(p.type) ? iconeSport(p.type) : iconeDisc(disciplineType(p.type));
   const titre = p ? libelleType(p.type) : titreRealisee(r);
   const trace = r && r.a_gps ? stockage.lire("trace:" + r.fichier_hash) : null;
   const stats = r ? [r.distance_km ? nb(r.distance_km, 1, "km") : duree(r.duree_min), r.dplus_m ? nb(r.dplus_m, 0, "m D+") : "",
     r.fc_moy ? `${r.fc_moy} bpm` : ""].filter(Boolean).join(" · ") : "";
   const detail = p ? [p.creneau && CRENEAUX[p.creneau], p.duree_min && duree(p.duree_min), p.distance_km && nb(p.distance_km, 1, "km"), p.detail].filter(Boolean).join(" · ")
-    : `${heure(r.date_debut)} · hors plan`;
+    : `${heure(r.date_debut)} · ${opts.mention || "hors plan"}`;
   const statut = p ? p.statut : "realise";
   return `${icone}
     <div class="seance-corps"><div class="seance-type">${esc(titre)}</div>
       <div class="seance-detail">${esc(detail)}</div>
       ${stats ? `<div class="seance-stats">${esc(stats)}</div>` : ""}</div>
     ${trace ? svgTrace(trace, 50, 35) : ""}
-    <div class="seance-droite">${p && p.type === "repos" ? "" : `<span class="statut ${statut}">${STATUTS[statut]}</span>`}${verdictHTML(verdict)}${pastillePreciser(r)}</div>`;
+    <div class="seance-droite">${p && p.type === "repos" ? "" : `<span class="statut ${statut}">${esc(opts.statut || STATUTS[statut])}</span>`}${verdictHTML(verdict)}${pastillePreciser(r)}</div>`;
 }

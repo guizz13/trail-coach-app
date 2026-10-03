@@ -86,30 +86,31 @@ def test_aujourdhui_jamais_manque_et_futur_a_faire():
     assert [db.planifiee(i)["statut"] for i in (aujourd, demain, repos)] == ["prevu", "prevu", "prevu"]
 
 
-def test_pas_de_liaison_sur_une_autre_date():
-    planifier("2026-09-29", "squash", "soir")
-    squash = realisee("2026-09-30T19:00:00+02:00", "squash")
+def test_pas_de_liaison_au_dela_de_deux_jours():
+    planifier("2026-09-28", "squash", "soir")                  # lundi, réalisée jeudi : 3 jours
+    squash = realisee("2026-10-01T19:00:00+02:00", "squash")
     services.recalculer_semaine(LUNDI)
     assert services.prevu_de(squash) is None
 
 
 def test_lier_et_delier_manuellement():
-    mardi = planifier("2026-09-29", "squash", "soir")
-    squash = realisee("2026-09-30T19:00:00+02:00", "squash")
+    lundi = planifier("2026-09-28", "squash", "soir")            # 3 jours avant : pas de liaison automatique
+    squash = realisee("2026-10-01T19:00:00+02:00", "squash")
     services.recalculer_semaine(LUNDI)
-    assert [p["id"] for p in services.candidats_liaison(squash)] == [mardi]
+    assert [p["id"] for p in services.candidats_liaison(squash)] == [lundi]
 
-    d = services.lier(squash, mardi)
-    assert d["prevu"]["id"] == mardi and db.seance(squash)["lien_manuel"] == 1
-    assert db.planifiee(mardi)["statut"] == "realise"
+    d = services.lier(squash, lundi)
+    assert d["prevu"]["id"] == lundi and db.seance(squash)["lien_manuel"] == 1
+    assert db.planifiee(lundi)["statut"] == "decale" and db.seance(squash)["decalage_jours"] == 3
 
     services.recalculer_tout()                                          # le lien manuel survit
-    assert lie_a(mardi) == squash
+    assert lie_a(lundi) == squash
 
     services.delier(squash)
-    assert lie_a(mardi) is None and db.planifiee(mardi)["statut"] == "manque"
+    assert lie_a(lundi) is None and db.planifiee(lundi)["statut"] == "manque"
+    assert db.seance(squash)["decalage_jours"] == 0
     services.recalculer_tout()                                          # et le déliage aussi
-    assert lie_a(mardi) is None
+    assert lie_a(lundi) is None
 
 
 def test_liaison_refusee_autre_famille_ou_semaine():

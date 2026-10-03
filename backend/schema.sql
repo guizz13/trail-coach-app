@@ -78,13 +78,21 @@ CREATE TABLE IF NOT EXISTS seances_planifiees (
     duree_min       INTEGER,
     distance_km     REAL,
     dplus_m         REAL,
-    statut          TEXT NOT NULL DEFAULT 'prevu' CHECK (statut IN ('prevu','realise','manque','modifie')),
+    statut          TEXT NOT NULL DEFAULT 'prevu' CHECK (statut IN ('prevu','realise','manque','modifie','decale','remplacee')),
     seance_realisee_id INTEGER REFERENCES seances_realisees(id),
     origine         TEXT,                           -- 'bilan_hebdo' | 'analyse_seance' | 'manuel'
     version         INTEGER NOT NULL DEFAULT 1,
     cree_le         TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_planifiees_date ON seances_planifiees(date_seance);
+
+-- Une séance réalisée peut remplacer une ou plusieurs séances prévues (badminton au lieu d'EF + muscu).
+-- Décision manuelle : conservée par le recalcul admin.
+CREATE TABLE IF NOT EXISTS remplacements (
+    seance_realisee_id   INTEGER NOT NULL REFERENCES seances_realisees(id) ON DELETE CASCADE,
+    seance_planifiee_id  INTEGER NOT NULL REFERENCES seances_planifiees(id) ON DELETE CASCADE,
+    PRIMARY KEY (seance_realisee_id, seance_planifiee_id)
+);
 
 -- ----------------------------------------------------------------------------
 -- Séances réalisées (import fichiers Suunto)

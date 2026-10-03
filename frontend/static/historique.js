@@ -131,7 +131,7 @@ async function rendreListe() {
     b.className = "liste-ligne";
     b.innerHTML = `${iconeSport(s.sport_id)}
       <div class="seance-corps"><div class="seance-type">${esc(titreRealisee(s))}</div>
-        <div class="seance-detail">${esc(dateFR(s.date_debut, { weekday: "short", day: "numeric", month: "short" }))} · ${esc(duree(s.duree_min))}${s.distance_km ? " · " + nb(s.distance_km, 1, "km") : ""}${s.source === "manuel" ? " · saisie" : ""}</div></div>
+        <div class="seance-detail">${esc(dateFR(s.date_debut, { weekday: "short", day: "numeric", month: "short" }))} · ${esc(duree(s.duree_min))}${s.distance_km ? " · " + nb(s.distance_km, 1, "km") : ""}${s.source === "manuel" ? " · saisie" : ""}${s.prevue_le ? ` · prévue ${dateFR(s.prevue_le, { weekday: "long" })}` : ""}</div></div>
       <div class="seance-droite">${verdictHTML(s.verdict)}${pastillePreciser(s)}<i class="ti ti-chevron-right muted"></i></div>`;
     b.onclick = () => ouvrir(s.id);
     el.appendChild(b);

@@ -99,6 +99,7 @@ def test_analyse_rouge_attend_validation(monkeypatch):
     rouge = {**ANALYSE_ORANGE, "verdict": "rouge", "validation_requise": True,
              "analyse": "Douleur au tendon d'Achille signalée en fin de séance."}
     brancher(monkeypatch, analyse_seance=rouge)
+    planifier("2026-09-23", "EF")              # la séance tapis du jour (sinon : avance sur vendredi)
     inter = planifier("2026-09-25", "intervals")
 
     r = services.importer_et_analyser(lire("course_tapis"), "tapis.json")
@@ -114,6 +115,7 @@ def test_analyse_rouge_attend_validation(monkeypatch):
 
 def test_garder_plan_initial(monkeypatch):
     brancher(monkeypatch, analyse_seance={**ANALYSE_ORANGE, "verdict": "rouge", "analyse": "Douleur au mollet droit."})
+    planifier("2026-09-23", "EF")
     inter = planifier("2026-09-25", "intervals")
     r = services.importer_et_analyser(lire("course_tapis"), "tapis.json")
     services.decider_ajustements(r["analyse_id"], accepter=False)

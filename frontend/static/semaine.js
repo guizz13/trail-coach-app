@@ -145,6 +145,9 @@ function rendreVolume(courante, realisees) {
 
 function rendrePlanning(jours, realisees, verdicts) {
   const parId = Object.fromEntries(realisees.map(s => [s.id, s]));
+  // Séance décalée : la prévue reste à sa date (« Décalée à dimanche »), la réalisée s'affiche à la sienne
+  const prevueDe = Object.fromEntries(jours.flatMap(j => j.planifiees).filter(p => p.seance_realisee_id).map(p => [p.seance_realisee_id, p]));
+  const jourDe = iso => dateFR(iso, { weekday: "long" });
   const el = $("#planning");
   el.innerHTML = "";
   for (const j of jours) {
@@ -154,20 +157,26 @@ function rendrePlanning(jours, realisees, verdicts) {
       ${j.date === tableau.aujourdhui ? "<span>aujourd'hui</span>" : ""}</div>`;
     for (const p of j.planifiees) {
       const r = p.seance_realisee_id ? parId[p.seance_realisee_id] : null;
+      const decalee = r && r.date_debut.slice(0, 10) !== p.date_seance;
       const b = document.createElement("button");
       b.className = "seance";
-      b.innerHTML = seanceHTML(p, r, r && verdicts[r.id]);
+      b.innerHTML = decalee ? seanceHTML(p, null, null, { statut: `Décalée à ${jourDe(r.date_debut.slice(0, 10))}` })
+        : seanceHTML(p, r, r && verdicts[r.id]);
       b.onclick = () => editer(p, r);
       carte.appendChild(b);
     }
-    for (const r of j.realisees_hors_plan) {
+    // Réalisées ce jour-là : hors plan, ou liées à une séance prévue un autre jour
+    const aAfficher = realisees.filter(r => r.date_debut.slice(0, 10) === j.date
+      && (!prevueDe[r.id] || prevueDe[r.id].date_seance !== j.date));
+    for (const r of aAfficher) {
+      const p = prevueDe[r.id];
       const b = document.createElement("button");
       b.className = "seance";
-      b.innerHTML = seanceHTML(null, r, verdicts[r.id]);
+      b.innerHTML = seanceHTML(null, r, verdicts[r.id], p ? { mention: `prévue ${jourDe(p.date_seance)}` } : {});
       b.onclick = () => { location.href = `/historique#${r.id}`; };
       carte.appendChild(b);
     }
-    if (!j.planifiees.length && !j.realisees_hors_plan.length) carte.insertAdjacentHTML("beforeend", `<div class="jour-vide">Rien de prévu</div>`);
+    if (!j.planifiees.length && !aAfficher.length) carte.insertAdjacentHTML("beforeend", `<div class="jour-vide">Rien de prévu</div>`);
     el.appendChild(carte);
   }
 }
