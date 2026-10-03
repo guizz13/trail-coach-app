@@ -81,6 +81,14 @@ COLONNES_AJOUTEES = [
     ("profil", "sante_zones", "TEXT NOT NULL DEFAULT '[]'"),     # JSON array
     ("profil", "sante_note", "TEXT"),
     ("profil", "sante_protocole", "TEXT"),                       # consignes du kiné
+    # v5 multisport : sport du catalogue + provenance
+    ("seances_realisees", "sport_id", "TEXT"),
+    ("seances_realisees", "source", "TEXT NOT NULL DEFAULT 'suunto_json'"),   # suunto_json | strava | manuel
+    ("seances_realisees", "source_id", "TEXT"),          # hash du fichier Suunto, id Strava, uuid
+    ("seances_realisees", "source_code", "TEXT"),        # code brut reçu ('82', 'TrailRun')
+    ("seances_realisees", "rpe", "INTEGER"),             # 1-10, saisi par l'utilisateur
+    ("seances_realisees", "note", "TEXT"),
+    ("seances_realisees", "sport_a_preciser", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 
@@ -88,14 +96,56 @@ def _colonnes(c: sqlite3.Connection, table: str) -> set[str]:
     return {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
 
 
+ACTIVITY_TYPES_INITIAUX = [("suunto_json", "3", "course_route"), ("suunto_json", "82", "trail"),
+                           ("suunto_json", "93", "course_tapis"), ("suunto_json", "37", "squash"),
+                           ("suunto_json", "17", "velo_salle"), ("suunto_json", "23", "muscu")]
+
+
 def migrer(c: sqlite3.Connection) -> None:
     sante_a_convertir = "sante_niveau" not in _colonnes(c, "profil")
+    sports_a_remplir = "sport_id" not in _colonnes(c, "seances_realisees")
+    _migrer_activity_types(c)
     for table, colonne, definition in COLONNES_AJOUTEES:
         if colonne not in _colonnes(c, table):
             c.execute(f"ALTER TABLE {table} ADD COLUMN {colonne} {definition}")
     if sante_a_convertir:
         _convertir_sante(c)
+    if sports_a_remplir:
+        _remplir_sports(c)
+    c.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_realisees_source ON seances_realisees(source, source_id)")
     _elargir_types_appel(c)
+
+
+def _migrer_activity_types(c: sqlite3.Connection) -> None:
+    """Ancienne table (code entier → famille) → (source, code, sport_id). Les codes appris sont conservés."""
+    from sports import SPORT_DEPUIS_FAMILLE
+    if "source" not in _colonnes(c, "activity_types"):
+        anciens = c.execute("SELECT code, famille FROM activity_types").fetchall()
+        c.execute("DROP TABLE IF EXISTS activity_types_old")
+        c.execute("ALTER TABLE activity_types RENAME TO activity_types_old")
+        c.execute("CREATE TABLE activity_types (source TEXT NOT NULL, code TEXT NOT NULL, sport_id TEXT NOT NULL, "
+                  "confirme INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (source, code))")
+        for code, famille in anciens:
+            if str(code) not in {x[1] for x in ACTIVITY_TYPES_INITIAUX}:
+                c.execute("INSERT OR IGNORE INTO activity_types (source, code, sport_id) VALUES ('suunto_json', ?, ?)",
+                          (str(code), SPORT_DEPUIS_FAMILLE.get(famille, "autre")))
+        c.execute("DROP TABLE activity_types_old")
+    c.executemany("INSERT OR IGNORE INTO activity_types (source, code, sport_id) VALUES (?, ?, ?)", ACTIVITY_TYPES_INITIAUX)
+
+
+def _remplir_sports(c: sqlite3.Connection) -> None:
+    """sport_id déduit de l'ancienne famille ; un course_outdoor à plus de 15 m de D+/km devient du trail ;
+    une séance « inconnu » de code 82 aussi (82 = trail dans les exports JSON)."""
+    from sports import SPORT_DEPUIS_FAMILLE
+    for id_, famille, code, km, dplus, h in c.execute(
+            "SELECT id, famille, activity_type_code, distance_km, dplus_m, fichier_hash FROM seances_realisees").fetchall():
+        sport = SPORT_DEPUIS_FAMILLE.get(famille, "autre")
+        if famille == "course_outdoor" and km and (dplus or 0) / km > 15:
+            sport = "trail"
+        if famille == "inconnu" and str(code) == "82":
+            sport = "trail"
+        c.execute("UPDATE seances_realisees SET sport_id = ?, source_code = ?, source_id = ? WHERE id = ?",
+                  (sport, None if code is None else str(code), h, id_))
 
 
 ZONES_SANTE = ["Achille G", "Achille D", "Fascia G", "Fascia D", "Mollet G", "Mollet D",
@@ -244,16 +294,24 @@ def maj_profil(**valeurs) -> None:
 # ---------------------------------------------------------------------------
 # Types d'activité
 # ---------------------------------------------------------------------------
-def activity_types() -> dict[int, str]:
-    return {r["code"]: r["famille"] for r in fetch_all("SELECT code, famille FROM activity_types")}
+def activity_types(source: str = "suunto_json") -> dict[str, str]:
+    """{code: sport_id} pour une source."""
+    return {r["code"]: r["sport_id"] for r in
+            fetch_all("SELECT code, sport_id FROM activity_types WHERE source = ?", (source,))}
 
 
-def enregistrer_activity_type(code: int, famille: str, libelle: Optional[str] = None) -> None:
+def correspondances(source: Optional[str] = None) -> list[dict]:
+    if source:
+        return fetch_all("SELECT * FROM activity_types WHERE source = ? ORDER BY CAST(code AS INTEGER), code", (source,))
+    return fetch_all("SELECT * FROM activity_types ORDER BY source, CAST(code AS INTEGER), code")
+
+
+def enregistrer_activity_type(code, sport_id: str, source: str = "suunto_json", confirme: bool = True) -> None:
     with connexion() as c:
         c.execute(
-            "INSERT INTO activity_types (code, famille, libelle) VALUES (?, ?, ?) "
-            "ON CONFLICT(code) DO UPDATE SET famille = excluded.famille, libelle = excluded.libelle",
-            (code, famille, libelle),
+            "INSERT INTO activity_types (source, code, sport_id, confirme) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(source, code) DO UPDATE SET sport_id = excluded.sport_id, confirme = excluded.confirme",
+            (source, str(code), sport_id, int(confirme)),
         )
 
 

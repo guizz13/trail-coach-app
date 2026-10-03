@@ -144,7 +144,7 @@ def test_type_inconnu():
 
     r = services.importer_et_analyser(brut, "x.json", famille="velo")
     assert r["seance"]["famille"] == "velo"
-    assert db.activity_types()[999] == "velo"
+    assert db.activity_types()["999"] == "velo_salle"
 
 
 def test_fichier_invalide():

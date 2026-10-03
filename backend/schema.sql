@@ -166,17 +166,16 @@ CREATE TABLE IF NOT EXISTS poids (
 -- ----------------------------------------------------------------------------
 -- Table de correspondance ActivityType (extensible depuis l'UI)
 -- ----------------------------------------------------------------------------
+-- Correspondance code reçu → sport du catalogue (backend/sports.py), apprise fichier par fichier.
+-- Les codes JSON Suunto ne suivent PAS la liste officielle de l'API Suunto (37 = squash, 82 = trail ici).
+-- Valeurs initiales : insérées par db.migrer (la table peut exister sous son ancien format).
 CREATE TABLE IF NOT EXISTS activity_types (
-    code            INTEGER PRIMARY KEY,
-    famille         TEXT NOT NULL,
-    libelle         TEXT
+    source          TEXT NOT NULL,                  -- 'suunto_json' | 'strava'
+    code            TEXT NOT NULL,                  -- '82' ou 'TrailRun'
+    sport_id        TEXT NOT NULL,
+    confirme        INTEGER NOT NULL DEFAULT 1,     -- 0 = deviné, en attente de confirmation
+    PRIMARY KEY (source, code)
 );
-INSERT OR IGNORE INTO activity_types VALUES
-    (3,  'course_outdoor', 'Course / trail outdoor'),
-    (93, 'course_tapis',   'Course sur tapis'),
-    (37, 'squash',         'Squash'),
-    (17, 'velo',           'Vélo en salle'),
-    (23, 'muscu',          'Musculation');
 
 -- ----------------------------------------------------------------------------
 -- Profil initial

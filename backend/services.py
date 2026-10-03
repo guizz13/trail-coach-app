@@ -147,7 +147,8 @@ def _extraire(fichier_bytes: bytes, famille: Optional[str] = None,
         raise ErreurImport("Format inattendu : clé 'DeviceLog' absente (export Suunto attendu).")
 
     # Types d'activité ajoutés depuis l'UI (table activity_types)
-    extractor.ACTIVITY_TYPE_MAP.update(db.activity_types())
+    extractor.ACTIVITY_TYPE_MAP.update({int(c): sports.famille_heritee(sid)
+                                        for c, sid in db.activity_types().items() if c.isdigit()})
     try:
         s = extractor.extraire(data)
     except (KeyError, TypeError, ValueError) as e:
@@ -205,6 +206,11 @@ def _ligne_seance(s: extractor.SeanceExtraite, h: str, nom: str, confirme: bool)
         "fichier_nom": nom,
         "activity_type_code": s.activity_type_code,
         "famille": s.famille,
+        "sport_id": db.activity_types().get(str(s.activity_type_code))
+                    or sports.SPORT_DEPUIS_FAMILLE.get(s.famille, "autre"),
+        "source": "suunto_json",
+        "source_id": h,
+        "source_code": str(s.activity_type_code),
         "sous_type": s.sous_type,
         "sous_type_confiance": s.confiance,
         "sous_type_confirme": int(confirme),
@@ -584,7 +590,7 @@ def importer_et_analyser(fichier_bytes: bytes, nom: str, muscu_detail: Optional[
     if s.famille == "inconnu":
         raise ErreurImport(f"Type d'activité {s.activity_type_code} inconnu : préciser la famille.")
     if famille:
-        db.enregistrer_activity_type(s.activity_type_code, s.famille)
+        db.enregistrer_activity_type(s.activity_type_code, sports.SPORT_DEPUIS_FAMILLE.get(s.famille, "autre"))
 
     ligne = _ligne_seance(s, h, nom, confirme)
     if douleur not in (None, ""):
