@@ -143,3 +143,16 @@ def test_regles_dures_ajustement():
     assert any("Muscu et course" in x for x in services.valider_ajustement(combo, lundi, premier))
     week_end = {"jours": [{"date": "2026-10-03", "seances": [seance("EF", 40), seance("muscu_pull", 50)]}]}
     assert not any("Muscu et course" in x for x in services.valider_ajustement(week_end, lundi, premier))
+
+
+def test_ajustement_vigilance_impact_eleve():
+    # Vigilance Achille : badminton réalisé jeudi, EF proposée vendredi → deux jours d'impact élevé de suite
+    preparer_semaine()
+    services.enregistrer_sante({"niveau": "vigilance", "zones": ["Achille G"], "protocole": "kiné"})
+    services.saisir_seance({"sport_id": "badminton", "debut": "2026-10-01T19:00", "duree_min": 60, "rpe": 7},
+                           analyser=False)
+    lundi, premier = LUNDI, date(2026, 10, 2)
+    ef_vendredi = {"jours": [{"date": "2026-10-02", "seances": [seance("EF", 40)]}]}
+    assert any("deux jours de suite" in x for x in services.valider_ajustement(ef_vendredi, lundi, premier))
+    velo_vendredi = {"jours": [{"date": "2026-10-02", "seances": [seance("velo", 40)]}]}
+    assert not any("deux jours de suite" in x for x in services.valider_ajustement(velo_vendredi, lundi, premier))
