@@ -269,3 +269,24 @@ def test_client_llm_transmet_le_bilan(monkeypatch):
     monkeypatch.setattr(client, "_appel", lambda type_appel, ctx, *a: vu.update(ctx) or {}, raising=False)
     client.bilan_hebdo([], [], {}, [], [], {}, {}, "100%", "BASE", None, bilan_semaine={"respect_global": "respectee"})
     assert vu["bilan_semaine"] == {"respect_global": "respectee"}
+
+
+# ---- 5. Routes HTTP --------------------------------------------------------------------------------
+from test_api import anonyme, client  # noqa: E402,F401 (fixtures)
+
+
+def test_api_remplacement_et_bilan(client):
+    x = semaine_du_28()
+    assert [p["id"] for p in client.get(f"/api/seances_realisees/{x['bad']}/remplacables").json()] == [x["ef_sam"]]
+    assert client.post(f"/api/seances_realisees/{x['bad']}/remplacer", json={"seance_planifiee_ids": "1"}).status_code == 422
+    r = client.post(f"/api/seances_realisees/{x['bad']}/remplacer", json={"seance_planifiee_ids": [x["ef_sam"]]})
+    assert r.status_code == 200 and r.json()["seance"]["remplace"][0]["id"] == x["ef_sam"]
+    b = client.get("/api/bilan_semaine?lundi=2026-09-30").json()            # n'importe quel jour de la semaine
+    assert b["lundi"] == "2026-09-28" and b["remplacements"] and b["manques"] == []
+    semaine = client.get("/api/semaine?lundi=2026-09-28").json()
+    sam = next(j for j in semaine if j["date"] == "2026-10-03")
+    assert {p["statut"] for p in sam["planifiees"]} == {"remplacee", "decale"}
+    r = client.post(f"/api/seances_realisees/{x['bad']}/annuler_remplacement")
+    assert r.status_code == 200 and r.json()["seance"]["remplace"] == []
+    assert client.post(f"/api/seances_realisees/{x['push']}/remplacer",
+                       json={"seance_planifiee_ids": [x["ef_sam"]]}).status_code == 422   # liée : refus
