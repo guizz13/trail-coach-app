@@ -27,6 +27,7 @@ from sources import strava, suunto_json
 from sources.base import RICHESSE_SOURCE, ActiviteNormalisee
 
 TZ = ZoneInfo("Europe/Paris")
+log = logging.getLogger("sensei")
 
 JOURS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
 ROTATION_MUSCU = ["push_a", "pull_a", "push_b", "pull_b"]
@@ -1200,6 +1201,25 @@ def analyse_coach(seance_id: int) -> Optional[dict]:
     return None
 
 
+TITRE_CAP_MAX_MOTS, PHRASE_CAP_MAX_MOTS = 6, 20
+
+
+def _cap_borne(titre: Optional[str], phrase: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """Garde-fou : titre ≤ 6 mots, phrase ≤ 20 mots. Un titre trop long est en général la phrase
+    mise au mauvais endroit : il devient la phrase si elle manque. Coupe aux mots entiers, écart loggué."""
+    mots = (titre or "").split()
+    if len(mots) > TITRE_CAP_MAX_MOTS:
+        log.warning("resume_semaine.titre trop long (%d mots) : « %s »", len(mots), titre)
+        if not phrase:
+            phrase = titre
+        titre = " ".join(mots[:TITRE_CAP_MAX_MOTS]).rstrip(",;:—-")
+    mots = (phrase or "").split()
+    if len(mots) > PHRASE_CAP_MAX_MOTS:
+        log.warning("resume_semaine.phrase trop longue (%d mots) : « %s »", len(mots), phrase)
+        phrase = " ".join(mots[:PHRASE_CAP_MAX_MOTS]).rstrip(",;:—-") + "…"
+    return titre, phrase
+
+
 def cap_semaine(lundi: date) -> dict:
     """Cap de la semaine (haut de l'onglet Semaine) : resume_semaine du bilan validé pour cette
     semaine ; si un réajustement a été appliqué ensuite, son message prend la place de la phrase."""
@@ -1210,9 +1230,12 @@ def cap_semaine(lundi: date) -> dict:
         return {"plan": False, "lundi": lundi.isoformat()}
     rep = bilan["reponse_json"]
     resume = rep.get("resume_semaine") if isinstance(rep.get("resume_semaine"), dict) else {}
+    titre, phrase = resume.get("titre"), resume.get("phrase")
+    if not resume:          # bilan d'avant v6 : l'objectif est une phrase, jamais un titre
+        titre, phrase = None, (rep.get("semaine_suivante") or {}).get("objectif")
+    titre, phrase = _cap_borne(titre, phrase)
     cap = {"plan": True, "lundi": lundi.isoformat(), "analyse_id": bilan["id"],
-           "titre": resume.get("titre") or (rep.get("semaine_suivante") or {}).get("objectif") or "Ta semaine",
-           "phrase": resume.get("phrase"), "focus": [f for f in (resume.get("focus") or []) if f][:3],
+           "titre": titre, "phrase": phrase, "focus": [f for f in (resume.get("focus") or []) if f][:3],
            "message_coach": rep.get("message_coach"), "ajuste_le": None}
     ajust = db.fetch_one("SELECT * FROM analyses_llm WHERE type_appel = 'ajustement_semaine' AND semaine_debut = ? "
                          "AND valide_par_user = 1 AND id > ? ORDER BY id DESC LIMIT 1", (lundi.isoformat(), bilan["id"]))
@@ -2233,7 +2256,6 @@ def normaliser_position_prepa(pp: dict) -> dict:
 
 
 TYPES_SPLIT = {"push": "muscu_push", "pull": "muscu_pull", "jambes": "muscu_jambes", "legs": "muscu_jambes"}
-log = logging.getLogger("sensei")
 
 
 def type_coherent(type_: Optional[str], detail: Optional[str]) -> Optional[str]:
@@ -2503,3 +2525,121 @@ def lancer_ajustement_proposition(analyse_id: int, note: Optional[str] = None) -
         raise ValueError("Ce plan est déjà validé : utilise « Réajuster » dans l'onglet Semaine.")
     return taches.lancer("ajustement_semaine", f"ajustement_semaine:proposition:{analyse_id}",
                          {"analyse_id": analyse_id, "note": note}, FONCTIONS_TACHES["ajustement_semaine"])
+
+
+# ---------------------------------------------------------------------------
+# Accueil « Aujourd'hui » : cap, séance du jour ou prochaine, bande de la semaine, forme
+# ---------------------------------------------------------------------------
+SEUIL_ACWR_ALERTE = 1.3
+JOURS_BANDEAU_PREPARER = (4, 5, 6)          # vendredi → dimanche
+
+
+def _a_faire(p: dict, remplacees) -> bool:
+    return p["type"] != "repos" and not p["seance_realisee_id"] and p["id"] not in remplacees \
+        and p["statut"] in ("prevu", "modifie")
+
+
+def _planifiee_ecran(p: dict) -> dict:
+    sid = sport_planifie(p["type"])
+    return {**p, "categorie": categorie_planifiee(p["type"]), "sport_id": sid, "libelle_court": libelle_court(p)}
+
+
+def etat_jour(jour: date, plan: list[dict], realisees: list[dict], remplacees, aujourd: date,
+              jour_prochaine: Optional[str]) -> dict:
+    """Pastille d'un jour : fait, repos, aujourdhui, prochaine, a_faire, manque, decale, libre."""
+    iso = jour.isoformat()
+    du_jour = [p for p in plan if p["date_seance"] == iso]
+    seances = [p for p in du_jour if p["type"] != "repos"]
+    faites = [s for s in realisees if s["date_debut"][:10] == iso]
+    if seances:
+        etats = []
+        for p in seances:
+            lie = next((s for s in realisees if s["id"] == p["seance_realisee_id"]), None)
+            if lie and lie["date_debut"][:10] == iso:
+                etats.append("fait")
+            elif p["seance_realisee_id"] or p["id"] in remplacees:
+                etats.append("decale")
+            elif p["statut"] == "manque":
+                etats.append("manque")
+            else:
+                etats.append("a_faire")
+        if all(e == "fait" for e in etats):
+            etat = "fait"
+        elif "manque" in etats:
+            etat = "manque"
+        elif "a_faire" not in etats:
+            etat = "decale"
+        elif jour == aujourd:
+            etat = "aujourdhui"
+        elif iso == jour_prochaine:
+            etat = "prochaine"
+        else:
+            etat = "a_faire"
+        reste = next((p for p, e in zip(seances, etats) if e != "fait"), seances[0])
+        cat = categorie_planifiee(reste["type"])
+    elif faites:
+        etat, cat = "fait", sports.categorie(sports.sport_de(faites[0]))
+    elif du_jour:
+        etat, cat = "repos", None
+    else:
+        etat, cat = "libre", None
+    return {"date": iso, "jour": JOURS[jour.weekday()], "etat": etat, "categorie": cat,
+            "aujourdhui": jour == aujourd}
+
+
+def ecran_aujourdhui(d: Optional[date] = None) -> dict:
+    d = d or aujourdhui()
+    lundi = lundi_de(d)
+    dimanche = lundi + timedelta(days=6)
+    marquer_manquees(d)
+    remplacees = db.planifiees_remplacees()
+    plan = db.planifiees_entre(lundi.isoformat(), dimanche.isoformat())
+    realisees = [_seance_publique(s) for s in db.seances_entre(lundi.isoformat(), dimanche.isoformat())]
+    p = db.profil()
+    sante = {**sante_profil(p), **sante_libelle_court(sante_profil(p))}
+
+    # Séance du jour, sinon la prochaine (y compris la semaine suivante)
+    ordre = lambda x: (x["date_seance"], RANG_CRENEAU.get(x["creneau"], 2))
+    du_jour = sorted((x for x in plan if x["date_seance"] == d.isoformat() and _a_faire(x, remplacees)), key=ordre)
+    if du_jour:
+        heros, quand = du_jour[0], "aujourdhui"
+    else:
+        futures = [x for x in db.planifiees_entre((d + timedelta(days=1)).isoformat(), (d + timedelta(days=13)).isoformat())
+                   if _a_faire(x, remplacees)]
+        heros, quand = (min(futures, key=ordre), "prochaine") if futures else (None, None)
+    faites_aujourdhui = [s for s in realisees if s["date_debut"][:10] == d.isoformat()]
+    demain = d + timedelta(days=1)
+    plan_demain = db.planifiees_entre(demain.isoformat(), demain.isoformat())
+    reperes = [("repos" if x["type"] == "repos" else "séance kiné") for x in plan_demain
+               if x["type"] == "repos" or "kin" in sports.sans_accents(x["type"])]
+
+    bilan = bilan_semaine(lundi)
+    acwr = acwr_dict(acwr_au(d))
+    alerte = bilan["alerte"]
+    if not alerte and acwr.get("ratio") and acwr["ratio"] > SEUIL_ACWR_ALERTE:
+        alerte = f"Équilibre de charge à {acwr['ratio']:.2f} : la semaine pousse fort, garde de la marge."
+    lundi_suivant = lundi + timedelta(weeks=1)
+    plan_suivant = cap_semaine(lundi_suivant)["plan"] or bool(
+        [x for x in db.planifiees_entre(lundi_suivant.isoformat(), (lundi_suivant + timedelta(days=6)).isoformat())])
+    return {
+        "date": d.isoformat(),
+        "profil": {"mode_actif": p.get("mode_actif")},
+        "sante": sante,
+        "prochain_a": prochain_evenement_a(d),
+        "phase": phase_active(d),
+        "cap_semaine": cap_semaine(lundi),
+        "seance": _planifiee_ecran(heros) if heros else None,
+        "quand": quand,
+        "decalable": bool(heros) and heros["date_seance"] <= dimanche.isoformat(),
+        "jours_decalage": [(lundi + timedelta(days=i)).isoformat() for i in range(7)
+                           if lundi + timedelta(days=i) >= d and heros and (lundi + timedelta(days=i)).isoformat() != heros["date_seance"]],
+        "faites_aujourdhui": faites_aujourdhui,
+        "demain": reperes,
+        "bande": [etat_jour(lundi + timedelta(days=i), plan, realisees, remplacees, d, heros["date_seance"] if heros else None)
+                  for i in range(7)],
+        "bilan_semaine": {k: bilan[k] for k in ("respect_global", "sous_statut", "seances_en_retard", "seances")},
+        "forme": {"acwr": acwr, "distribution": distribution_semaine(lundi)},
+        "alerte": alerte,
+        "preparer_semaine_prochaine": d.weekday() in JOURS_BANDEAU_PREPARER and not plan_suivant,
+        "plan_semaine": bool([x for x in plan if x["type"] != "repos"]),
+    }

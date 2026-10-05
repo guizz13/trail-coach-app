@@ -639,3 +639,48 @@ dialog.feuille { transition: transform .18s ease; }
 .action-ligne .seance-corps { display: flex; flex-direction: column; }
 .action-icone { width: 36px; height: 36px; border-radius: var(--radius-sm); display: grid; place-items: center; font-size: 18px;
   background: var(--accent-dim); color: var(--accent-light); flex-shrink: 0; }
+
+/* ---- Aujourd'hui (accueil) ------------------------------------------------------------------ */
+.titre-jour { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-top: 6px; }
+.titre-jour h1 { margin: 0; font-size: 22px; white-space: nowrap; }
+.compte-a { font-size: 12px; font-weight: 600; color: var(--orange); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aujourdhui #pastilles { margin-top: 8px; }
+.aujourdhui #bandeau-preparer:not(:empty) { margin-top: 10px; }
+a.bandeau-tache { text-decoration: none; }
+/* Cap de la semaine : bord gauche violet, étiquette, titre, phrase, focus */
+.cap-carte { display: block; width: 100%; margin-top: 14px; padding: 12px 14px; text-align: left; font: inherit; color: inherit; cursor: pointer;
+  background: var(--bg-card); border: 0; border-left: 3px solid var(--accent); border-radius: 0; }
+.cap-tete { display: flex; align-items: center; justify-content: space-between; color: var(--text-muted); }
+.cap-etiquette { font-size: 11px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; color: var(--text-muted); }
+.cap-carte .cap-titre { font-size: 17px; font-weight: 600; margin-top: 4px; }
+.cap-carte .cap-phrase { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.pill.orange { background: var(--orange-dim); color: var(--orange); }
+/* Séance du jour */
+.heros { padding: 14px; }
+.disc.grand { width: 44px; height: 44px; font-size: 24px; border-radius: 12px; }
+.heros-titre { font-size: 16px; font-weight: 600; }
+.heros-detail { margin: 10px 0 0; font-size: 12px; color: var(--text-secondary); line-height: 1.45;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.heros .boutons { margin-top: 12px; }
+.demain { font-size: 11px; color: var(--text-muted); margin-top: 14px; }
+.demain + .section-label { margin-top: 4px; }
+.fait-carte { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; text-align: left; font: inherit; color: inherit;
+  background: var(--bg-card); border: 0.5px solid var(--border); border-radius: var(--radius); cursor: pointer; }
+.fait-analyse { display: block; font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.vide-plan .btn { display: inline-flex; }
+/* Bande de la semaine */
+.bande { display: flex; justify-content: space-between; }
+.jour-pastille { display: flex; flex-direction: column; align-items: center; gap: 4px; text-decoration: none; }
+.jour-lettre { font-size: 10px; font-weight: 600; color: var(--text-muted); }
+.jour-lettre.actif { color: var(--accent-light); }
+.rond { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; font-size: 16px;
+  border: 1.5px solid var(--border); color: var(--text-muted); background: transparent; }
+.rond.fait { background: var(--green-dim); border-color: var(--green-dim); color: var(--green); }
+.rond.repos, .rond.decale { background: var(--bg-surface); border-color: var(--bg-surface); color: var(--text-muted); }
+.rond.aujourdhui, .rond.prochaine { border-color: var(--accent); color: var(--accent-light); }
+.rond.manque { border-color: var(--red); color: var(--red); }
+.rond.libre { border-style: dashed; }
+.bande-resume { font-size: 11px; color: var(--text-muted); text-align: center; margin-top: 8px; }
+.bande-resume.orange { color: var(--orange); }
+.aujourdhui #forme { margin-top: 14px; }
+.tuile { text-decoration: none; color: inherit; display: block; }

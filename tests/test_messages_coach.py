@@ -49,7 +49,7 @@ def test_cap_du_plan_valide(monkeypatch):
 def test_ancien_bilan_sans_resume(monkeypatch):
     valider_un_bilan(monkeypatch, resume=None)
     cap = services.cap_semaine(LUNDI)
-    assert cap["titre"] == "tenir" and cap["phrase"] is None and cap["focus"] == []
+    assert cap["titre"] is None and cap["phrase"] == "tenir" and cap["focus"] == []      # l'objectif est une phrase
 
 
 def test_ajustement_applique_prend_la_place(monkeypatch):
@@ -93,3 +93,19 @@ def test_sans_analyse():
     sid = services.saisir_seance({"sport_id": "muscu", "debut": "2026-10-13T07:00", "duree_min": 50, "rpe": 6},
                                  analyser=False)["seance"]["id"]
     assert services.analyse_coach(sid) is None
+
+
+
+# ---- v7 : garde-fou sur le cap -------------------------------------------------------------------------
+def test_titre_trop_long_devient_la_phrase(monkeypatch, caplog):
+    long_ = "Reprise prudente avec trois EF courtes et squash limité à 45 minutes"
+    with caplog.at_level("WARNING", logger="sensei"):
+        valider_un_bilan(monkeypatch, resume={"titre": long_, "focus": []})
+        cap = services.cap_semaine(LUNDI)
+    assert cap["titre"] == "Reprise prudente avec trois EF courtes" and cap["phrase"] == long_
+    assert "trop long" in caplog.text
+
+
+def test_phrase_trop_longue_coupee_aux_mots():
+    titre, phrase = services._cap_borne("Cap court", " ".join(f"mot{i}" for i in range(25)))
+    assert titre == "Cap court" and phrase.split()[-1] == "mot19…" and len(phrase.split()) == 20

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Sensei">
+  <meta name="theme-color" content="#09090C">
+  <title>Sensei — Aujourd'hui</title>
+  <link rel="manifest" href="/static/manifest.json" crossorigin="use-credentials">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/static/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main class="aujourdhui">
+  <div class="titre-jour"><h1 id="date-jour">Aujourd'hui</h1><span id="compte-a" class="compte-a"></span></div>
+  <div id="pastilles" class="pill-row"></div>
+  <div id="bandeau-preparer"></div>
+  <div id="cap"><div class="squelette" style="height:118px"></div></div>
+  <div id="seance-jour"><div class="squelette" style="height:150px"></div></div>
+  <div id="bande"><div class="squelette" style="height:72px"></div></div>
+  <div id="alerte"></div>
+  <div id="forme" class="grille-2"><div class="squelette" style="height:78px"></div><div class="squelette" style="height:78px"></div></div>
+</main>
+<script src="/static/app.js"></script>
+<script src="/static/sport-picker.js"></script>
+<script src="/static/seance.js"></script>
+<script src="/static/aujourdhui.js"></script>
+</body>
+</html>
