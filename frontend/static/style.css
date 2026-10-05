@@ -586,3 +586,11 @@ button.cap-semaine { display: block; width: 100%; text-align: left; font: inheri
   body > *:not(.rotate-overlay) { visibility: hidden; }
 }
 .rotate-s { width: 48px; height: 48px; color: var(--accent); }
+
+/* ---- Carte de séance réalisée : analyse du coach ------------------------------------------------ */
+.seance-analyse { margin: 2px 0 0; }
+.seance-analyse .texte { font-size: 11px; line-height: 1.4; color: var(--text-secondary); }
+.seance-analyse .voir-plus { padding-top: 2px; font-size: 10px; display: inline-block; }
+.seance-analyse.repliable { margin-bottom: 0; }
+.seance-detail.muted { color: var(--text-muted); opacity: .8; }
+.lien-analyser { display: inline-block; margin-top: 2px; font-size: 11px; font-weight: 600; color: var(--accent-light); cursor: pointer; }

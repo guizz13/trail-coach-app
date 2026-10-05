@@ -239,6 +239,23 @@ async function tacheDansZone(zone, tache, messages, rendu) {
   }));
 }
 
+// Lien « Analyser » d'une séance réalisée sans analyse : la tâche part, la page se met à jour à la fin
+document.addEventListener("click", async e => {
+  const b = e.target.closest("[data-analyser-id]");
+  if (!b) return;
+  e.preventDefault();
+  e.stopPropagation();                       // la carte elle-même ouvre le détail
+  const id = b.dataset.analyserId;
+  b.removeAttribute("data-analyser-id");
+  b.textContent = "Analyse en cours…";
+  try {
+    const t = await suivreTache(await api("POST", `/api/seances_realisees/${id}/analyser`));
+    if (t.statut === "termine") { location.reload(); return; }
+    b.textContent = "Échec — réessayer";
+  } catch (err) { b.textContent = "Échec — réessayer"; }
+  b.dataset.analyserId = id;
+}, true);
+
 let tachesActives = [], minuteurTaches = null;
 async function surveillerTaches() {
   clearTimeout(minuteurTaches);
@@ -298,7 +315,11 @@ function activerRepliables(racine) {
     r.dataset.pret = "1";
     const t = $(".texte", r), b = $(".voir-plus", r);
     requestAnimationFrame(() => { if (t.scrollHeight > t.clientHeight + 1) b.classList.remove("hidden"); });
-    b.onclick = () => { const ouvert = r.classList.toggle("deplie"); b.textContent = ouvert ? "Réduire" : "Voir plus"; };
+    b.onclick = e => {
+      e.stopPropagation();                   // « Voir plus » dans une carte cliquable
+      const ouvert = r.classList.toggle("deplie");
+      b.textContent = ouvert ? "Réduire" : "Voir plus";
+    };
   });
 }
 // Les pages injectent leur contenu dynamiquement : on active chaque bloc dès son insertion
@@ -622,12 +643,24 @@ function seanceHTML(p, r, verdict, opts = {}) {
   const trace = r && r.a_gps ? stockage.lire("trace:" + r.fichier_hash) : null;
   const stats = r ? [r.distance_km ? nb(r.distance_km, 1, "km") : duree(r.duree_min), r.dplus_m ? nb(r.dplus_m, 0, "m D+") : "",
     r.fc_moy ? `${r.fc_moy} bpm` : ""].filter(Boolean).join(" · ") : "";
-  const detail = p ? [p.creneau && CRENEAUX[p.creneau], p.duree_min && duree(p.duree_min), p.distance_km && nb(p.distance_km, 1, "km"), p.detail].filter(Boolean).join(" · ")
-    : `${heure(r.date_debut)} · ${opts.mention || "hors plan"}`;
+  const prevuTexte = p ? [p.creneau && CRENEAUX[p.creneau], p.duree_min && duree(p.duree_min), p.distance_km && nb(p.distance_km, 1, "km"), p.detail].filter(Boolean).join(" · ") : "";
+  const mention = r && !p ? `${heure(r.date_debut)} · ${opts.mention || "hors plan"}` : "";
+  // Séance réalisée : l'analyse du coach remplace la description prévue (celle-ci reste dans le détail)
+  let detailHTML;
+  if (r && r.analyse_coach) {
+    detailHTML = `<div class="seance-analyse repliable"><p class="texte">${esc(r.analyse_coach.texte)}</p>
+      <span role="button" tabindex="0" class="voir-plus hidden">Voir plus</span></div>
+      ${mention ? `<div class="seance-detail">${esc(mention)}</div>` : ""}`;
+  } else if (r) {
+    detailHTML = `<div class="seance-detail ${p ? "muted" : ""}">${esc(p ? prevuTexte : mention)}</div>
+      ${r.sport_a_preciser ? "" : `<span role="button" tabindex="0" class="lien-analyser" data-analyser-id="${r.id}">Analyser</span>`}`;
+  } else {
+    detailHTML = `<div class="seance-detail">${esc(prevuTexte)}</div>`;
+  }
   const statut = p ? p.statut : "realise";
   return `${icone}
     <div class="seance-corps"><div class="seance-type">${esc(titre)}</div>
-      <div class="seance-detail">${esc(detail)}</div>
+      ${detailHTML}
       ${stats ? `<div class="seance-stats">${esc(stats)}</div>` : ""}</div>
     ${trace ? svgTrace(trace, 50, 35) : ""}
     <div class="seance-droite">${p && p.type === "repos" ? "" : `<span class="statut ${statut}">${esc(opts.statut || STATUTS[statut])}</span>`}${verdictHTML(verdict)}${pastillePreciser(r)}</div>`;

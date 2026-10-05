@@ -14,16 +14,17 @@ async function charger(lundi) {
     lundiAffiche = lundi || tableau.lundi;
     const courante = lundiAffiche === tableau.lundi;
     const dimanche = ajouterJours(lundiAffiche, 6);
-    const [jours, realisees, bilan] = await Promise.all([
+    const [jours, realisees, bilan, cap] = await Promise.all([
       courante ? tableau.semaine : api("GET", `/api/semaine?lundi=${lundiAffiche}`),
       api("GET", `/api/seances?du=${lundiAffiche}&au=${dimanche}`),
       courante ? tableau.bilan_semaine : api("GET", `/api/bilan_semaine?lundi=${lundiAffiche}`),
+      courante ? tableau.cap_semaine : api("GET", `/api/cap_semaine?lundi=${lundiAffiche}`),
     ]);
     // Verdict stocké sur chaque séance réalisée (recalculé à chaque changement)
     const verdicts = Object.fromEntries(realisees.map(s => [s.id, s.verdict]));
     rendreEntete(dimanche);
     rendreObjectifProche();
-    rendreCoach(dimanche);
+    rendreCap(cap, dimanche);
     rendreForme(courante, realisees, dimanche);
     rendreVolume(courante, realisees);
     rendreBilanSemaine(bilan);
@@ -91,12 +92,25 @@ function rendreObjectifProche() {
 }
 
 // Message du coach : seulement si une analyse ou un bilan date de la semaine affichée
-function rendreCoach(dimanche) {
-  const a = tableau.derniere_analyse, el = $("#coach");
-  const r = a && a.reponse_json;
-  const jour = a && a.cree_le.slice(0, 10);
-  if (!r || r.erreur || jour < lundiAffiche || jour > dimanche) { el.innerHTML = ""; return; }
-  el.innerHTML = messageCoach(r.message_coach || r.analyse, `${APPELS[a.type_appel] || "Message"} du coach`);
+// Cap de la semaine : résumé du plan validé (ou du réajustement appliqué) ; tap → message complet
+function rendreCap(cap, dimanche) {
+  const el = $("#coach");
+  if (!cap || !cap.plan) {
+    // Semaine passée sans plan : rien à proposer ; à venir ou en cours : direction Préparer
+    el.innerHTML = dimanche < tableau.aujourdhui ? "" : `<div class="carte cap-semaine vide-plan">
+        <div class="cap-phrase" style="margin-top:0">Pas encore de plan pour cette semaine.</div>
+        <a class="btn petit" href="/preparer" style="margin-top:10px"><i class="ti ti-adjustments"></i>Préparer</a></div>`;
+    return;
+  }
+  el.innerHTML = `<button type="button" class="carte cap-semaine" id="cap">
+      <div class="cap-titre">${esc(cap.titre)}</div>
+      ${cap.phrase ? `<div class="cap-phrase">${esc(cap.phrase)}</div>` : ""}
+      ${cap.focus.length ? `<div class="pill-row" style="margin-top:10px">${cap.focus.map(f => `<span class="pill">${esc(f)}</span>`).join("")}</div>` : ""}
+      ${cap.ajuste_le ? `<div class="cap-mention">Ajusté le ${esc(dateFR(cap.ajuste_le, { weekday: "long" }))}</div>` : ""}
+    </button>`;
+  $("#cap").onclick = () => feuille(`<h2>${esc(cap.titre)}</h2>
+    ${messageCoach(cap.message_coach, cap.ajuste_le ? "Réajustement de Sensei" : "Message du coach")}
+    ${cap.message_bilan ? messageCoach(cap.message_bilan, "Plan de la semaine") : ""}`);
 }
 
 function rendreForme(courante, realisees, dimanche) {

@@ -264,6 +264,7 @@ function rendreLiaison(d, x) {
   if (x.prevu) {
     el.innerHTML = `<div class="liaison"><span>Liée à : <b>${esc(libellePrevu(x.prevu))}</b>${x.seance.lien_manuel ? ` <span class="sous-texte">(manuel)</span>` : ""}</span>
       <button type="button" class="btn petit" data-delier>Délier</button></div>
+      ${x.prevu.detail ? `<div class="sous-texte" style="margin-top:4px">Prévu : ${esc(x.prevu.detail)}</div>` : ""}
       ${x.substitution ? `<div class="sous-texte" style="margin-top:4px">${esc(x.substitution)}</div>` : ""}<div class="liaison-erreur"></div>`;
     $("[data-delier]", el).onclick = () => apres(api("POST", `/api/seances_realisees/${id}/delier`));
     return;

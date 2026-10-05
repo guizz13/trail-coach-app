@@ -1167,6 +1167,37 @@ def recalculer_tout() -> dict:
 recalculer_verdicts = recalculer_tout      # nom historique de la route admin
 
 
+def analyse_coach(seance_id: int) -> Optional[dict]:
+    """Dernière analyse du coach (analyse_seance) d'une séance réalisée ; les échecs sont ignorés."""
+    for a in db.analyses_seance(seance_id):                 # plus récente d'abord
+        rep = a["reponse_json"] if isinstance(a["reponse_json"], dict) else {}
+        if a["type_appel"] == "analyse_seance" and rep.get("analyse"):
+            return {"texte": rep["analyse"], "verdict": a["verdict"], "cree_le": a["cree_le"], "analyse_id": a["id"]}
+    return None
+
+
+def cap_semaine(lundi: date) -> dict:
+    """Cap de la semaine (haut de l'onglet Semaine) : resume_semaine du bilan validé pour cette
+    semaine ; si un réajustement a été appliqué ensuite, son message prend la place de la phrase."""
+    lundi = lundi_de(lundi)
+    bilan = db.fetch_one("SELECT * FROM analyses_llm WHERE type_appel = 'bilan_hebdo' AND semaine_debut = ? "
+                         "AND valide_par_user = 1 ORDER BY id DESC LIMIT 1", (lundi.isoformat(),))
+    if not bilan or not isinstance(bilan["reponse_json"], dict):
+        return {"plan": False, "lundi": lundi.isoformat()}
+    rep = bilan["reponse_json"]
+    resume = rep.get("resume_semaine") if isinstance(rep.get("resume_semaine"), dict) else {}
+    cap = {"plan": True, "lundi": lundi.isoformat(), "analyse_id": bilan["id"],
+           "titre": resume.get("titre") or (rep.get("semaine_suivante") or {}).get("objectif") or "Ta semaine",
+           "phrase": resume.get("phrase"), "focus": [f for f in (resume.get("focus") or []) if f][:3],
+           "message_coach": rep.get("message_coach"), "ajuste_le": None}
+    ajust = db.fetch_one("SELECT * FROM analyses_llm WHERE type_appel = 'ajustement_semaine' AND semaine_debut = ? "
+                         "AND valide_par_user = 1 AND id > ? ORDER BY id DESC LIMIT 1", (lundi.isoformat(), bilan["id"]))
+    if ajust and isinstance(ajust["reponse_json"], dict) and ajust["reponse_json"].get("message_coach"):
+        cap.update(phrase=ajust["reponse_json"]["message_coach"], message_coach=ajust["reponse_json"]["message_coach"],
+                   message_bilan=rep.get("message_coach"), ajuste_le=ajust["cree_le"][:10])
+    return cap
+
+
 def _seance_publique(s: dict) -> dict:
     """Séance sans le JSON brut (volumineux et redondant), avec la date prévue si elle a été
     décalée (« Prévue samedi »)."""
@@ -1175,6 +1206,7 @@ def _seance_publique(s: dict) -> dict:
         out["prevue_le"] = (date_de(s["date_debut"]) - timedelta(days=s["decalage_jours"])).isoformat()
     if s.get("id"):
         out["remplace"] = [{k: p[k] for k in ("id", "type", "date_seance", "duree_min")} for p in db.remplacees_par(s["id"])]
+        out["analyse_coach"] = analyse_coach(s["id"])
     return out
 
 
@@ -1275,6 +1307,7 @@ def tableau_de_bord(d: Optional[date] = None) -> dict:
         "ajustement": etat_ajustement(d),
         "sante": {**sante_profil(), **sante_libelle_court(sante_profil())},
         "bilan_semaine": bilan_semaine(lundi),
+        "cap_semaine": cap_semaine(lundi),
     }
 
 

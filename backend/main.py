@@ -254,6 +254,12 @@ def api_semaine(lundi: str):
     return services.semaine(services.lundi_de(date.fromisoformat(lundi)))
 
 
+@app.get("/api/cap_semaine")
+def api_cap_semaine(lundi: str):
+    from datetime import date
+    return services.cap_semaine(date.fromisoformat(lundi))
+
+
 @app.get("/api/bilan_semaine")
 def api_bilan_semaine(lundi: str):
     from datetime import date

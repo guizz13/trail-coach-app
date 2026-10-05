@@ -306,6 +306,11 @@ Si une VFC est fournie, une baisse nette par rapport à la moyenne sur 4 semaine
       {"si": "fatigue ou gêne mardi matin", "alors": "intervals remplacés par EF 40 min"}
     ]
   },
+  "resume_semaine": {
+    "titre": "Reprise prudente, tendon d'abord",
+    "phrase": "Trois EF courtes, jamais deux jours d'impact d'affilée, squash 45 min max.",
+    "focus": ["Achille : 0 impact consécutif", "Squash ≤ 45 min", "2 muscu dont 1 Pull"]
+  },
   "message_coach": "1-2 phrases directes à l'athlète (30 mots max). Le point le plus important de la semaine."
 }
 ```
@@ -313,6 +318,7 @@ Si une VFC est fournie, une baisse nette par rapport à la moyenne sur 4 semaine
 Le champ "resume" du bilan fait 3 phrases maximum (50 mots max).
 Le champ "message_coach" fait 1 à 2 phrases maximum (30 mots max). Direct et actionnable.
 Le champ "objectif" de la semaine suivante fait 1 phrase (15 mots max).
+Le bloc "resume_semaine" est le cap de la semaine à venir, affiché en haut du planning : "titre" 6 mots max, "phrase" 20 mots max, "focus" 3 éléments max de 6 mots max chacun. Direct, sans répéter des chiffres déjà visibles ailleurs (volume, charge, ACWR).
 Le champ "position_prepa.phase" vaut strictement BASE, BUILD, PIC, AFFUTAGE ou LIBRE. Toute précision va dans "position_prepa.detail" (12 mots max), jamais dans "phase".
 
 ### 10.3 — `reconstruction_evenements`
