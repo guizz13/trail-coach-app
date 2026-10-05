@@ -87,13 +87,24 @@ async function generer() {
   $("#generer").disabled = true;
   chargeurIA(res, MESSAGES_BILAN);
   res.scrollIntoView({ behavior: "smooth", block: "start" });
-  try {
-    bilan = await api("POST", "/api/bilan", imperatifs);
-    afficher();
-  } catch (err) {
+  try { await suivreBilan(await api("POST", "/api/bilan", imperatifs)); }
+  catch (err) {
     res.innerHTML = "";
     res.appendChild(carteErreurLLM({ type: "reseau", message: err.message }, generer));
   } finally { $("#generer").disabled = false; }
+}
+
+// La génération tourne côté serveur : on peut quitter la page et revenir
+function suivreBilan(tache) {
+  return tacheDansZone($("#resultat"), tache, MESSAGES_BILAN, r => { bilan = r; afficher(); });
+}
+
+async function reprendreBilan() {
+  const [t] = await api("GET", `/api/taches?cle=bilan_hebdo:${form.semaine_debut.value}`);
+  if (t && (t.statut === "en_cours" || !t.vue)) {
+    $("#resultat").scrollIntoView({ behavior: "smooth", block: "start" });
+    await suivreBilan(t);
+  }
 }
 
 // ---- Résultat ------------------------------------------------------------------
@@ -234,4 +245,4 @@ async function valider() {
   } catch (e) { erreurSimple(el, e); }
 }
 
-init().catch(e => erreurSimple($("#resultat"), e));
+init().then(reprendreBilan).catch(e => erreurSimple($("#resultat"), e));

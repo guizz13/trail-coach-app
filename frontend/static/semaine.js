@@ -29,6 +29,7 @@ async function charger(lundi) {
     rendreBilanSemaine(bilan);
     rendrePlanning(jours, realisees, verdicts);
     rendreReajuster(courante);
+    if (courante) reprendreAjustement().catch(() => {});
     $("#ajouter").classList.toggle("hidden", !courante);   // ajout : semaine en cours uniquement
     $("#ajouter-realisee").classList.toggle("hidden", !courante);
   } catch (e) { erreurSimple($("#planning"), e); }
@@ -302,10 +303,28 @@ async function reajuster() {
   const zone = $("#apercu-ajustement"), bouton = $("#btn-reajuster");
   bouton.disabled = true;
   chargeurIA(zone, MESSAGES_AJUSTEMENT);
+  try { suivreAjustement(await api("POST", "/api/semaine/ajuster", {})); }
+  catch (e) { zone.innerHTML = ""; zone.appendChild(carteErreurLLM({ type: "reseau", message: e.message }, reajuster)); bouton.disabled = false; }
+}
+
+// Réajustement en tâche de fond : repris au retour sur la page (en cours, ou prêt et pas encore vu)
+function suivreAjustement(tache) {
+  const zone = $("#apercu-ajustement"), bouton = $("#btn-reajuster");
+  if (!zone || !bouton) return;
+  bouton.disabled = true;
+  tacheDansZone(zone, tache, MESSAGES_AJUSTEMENT, r => afficherAjustement(r));
+}
+
+async function reprendreAjustement() {
+  if (lundiAffiche !== tableau.lundi || !$("#btn-reajuster")) return;
+  const [t] = await api("GET", `/api/taches?cle=ajustement_semaine:${tableau.lundi}`);
+  if (t && (t.statut === "en_cours" || !t.vue)) suivreAjustement(t);
+}
+
+function afficherAjustement(r) {
+  const zone = $("#apercu-ajustement"), bouton = $("#btn-reajuster");
   try {
-    const r = await api("POST", "/api/semaine/ajuster");
-    if (r.erreur_llm) { zone.innerHTML = ""; zone.appendChild(carteErreurLLM(r.erreur_llm, reajuster)); return; }
-    if (!r.ok) { zone.innerHTML = `<div class="bandeau gris">${esc(r.message)}</div>`; return; }
+    if (!r.ok) { zone.innerHTML = `<div class="bandeau gris">${esc(r.message)}</div>`; bouton.disabled = false; return; }
     zone.innerHTML = `${messageCoach(r.message_coach, "Proposition de Sensei")}
       <div class="carte" style="margin-top:8px"><div class="metrique"><span class="label">Changements</span></div>
         ${(r.changements || []).map(x => `<div class="seance-detail" style="-webkit-line-clamp:unset;margin-top:6px">· ${esc(x)}</div>`).join("") || `<div class="vide">Aucun changement listé.</div>`}
@@ -316,8 +335,7 @@ async function reajuster() {
       try { await api("POST", `/api/semaine/ajustements/${r.analyse_id}/appliquer`); recharger(); }
       catch (e) { erreurSimple(zone, e); }
     };
-  } catch (e) { zone.innerHTML = ""; zone.appendChild(carteErreurLLM({ type: "reseau", message: e.message }, reajuster)); }
-  finally { if (!zone.querySelector("[data-appliquer]")) bouton.disabled = false; }
+  } finally { if (!zone.querySelector("[data-appliquer]")) bouton.disabled = false; }
 }
 
 function recharger() { const l = lundiAffiche; tableau = null; charger(l); }

@@ -163,6 +163,23 @@ CREATE TABLE IF NOT EXISTS analyses_llm (
 );
 
 -- ----------------------------------------------------------------------------
+-- Tâches IA persistantes (backend/taches.py) : l'appel LLM vit côté serveur, pas dans la page
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS taches_ia (
+    id           TEXT PRIMARY KEY,              -- uuid
+    type         TEXT NOT NULL,                 -- analyse_seance | bilan_hebdo | ajustement_semaine | reconstruction_evenements
+    cle          TEXT NOT NULL,                 -- ex. 'bilan_hebdo:2026-10-12', 'analyse_seance:842'
+    statut       TEXT NOT NULL,                 -- en_cours | termine | erreur
+    parametres   TEXT,                          -- JSON, pour « Réessayer »
+    resultat     TEXT,                          -- JSON
+    erreur       TEXT,
+    vue          INTEGER NOT NULL DEFAULT 0,    -- l'utilisateur a vu le résultat
+    cree_le      TEXT NOT NULL,
+    termine_le   TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_taches_cle ON taches_ia(cle, statut);
+
+-- ----------------------------------------------------------------------------
 -- Suivi poids (saisie manuelle ou import balance)
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS poids (

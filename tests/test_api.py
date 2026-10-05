@@ -177,7 +177,9 @@ def test_evenement_declenche_reconstruction(client):
     r = client.post("/api/evenements", json={"type": "other", "titre": "Mariage",
                                              "date_evt": "2027-06-01"}).json()
     assert r["evenement"]["id"]
-    assert r["reconstruction"]["erreur_llm"]["type"] == "ConnectionError"
+    t = r["tache"]                                      # tâche IA : sans LLM, elle finit en erreur
+    assert t["type"] == "reconstruction_evenements" and t["statut"] == "erreur"
+    assert t["resultat"]["erreur_llm"]["type"] == "ConnectionError"
     assert client.delete(f"/api/evenements/{r['evenement']['id']}").json()["ok"] is True
 
 
@@ -193,8 +195,9 @@ def test_suppression_evenement_reference_par_analyse(client):
 def test_dimanche_et_bilan_sans_llm(client):
     d = client.get("/api/dimanche").json()
     assert d["jours"][0] == "lundi"
-    r = client.post("/api/bilan", json={"semaine_debut": d["semaine_debut"], "ressenti": 7}).json()
-    assert r["reponse"] is None and r["erreur_llm"]
+    t = client.post("/api/bilan", json={"semaine_debut": d["semaine_debut"], "ressenti": 7}).json()
+    assert t["cle"] == f"bilan_hebdo:{d['semaine_debut']}" and t["statut"] == "erreur"
+    assert t["resultat"]["reponse"] is None and t["resultat"]["erreur_llm"]
     assert client.post("/api/bilan", json={"ressenti": 12}).status_code == 422
     assert client.post("/api/bilan/999/valider", json={}).status_code == 422
 

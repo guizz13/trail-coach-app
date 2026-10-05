@@ -31,6 +31,7 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 
 import db  # noqa: E402
 import services  # noqa: E402
+import taches  # noqa: E402
 
 FRONTEND = BACKEND.parent / "frontend"
 TAILLE_MAX_FICHIER = 25 * 1024 * 1024
@@ -106,6 +107,7 @@ async def _cycle_de_vie(_: FastAPI):
     _mot_de_passe()
     db.init_db()
     services.defaire_liaisons_incoherentes()     # garde-fou : jamais de liaison entre disciplines différentes
+    taches.interrompre_au_demarrage()            # les threads de l'ancien processus sont morts
     yield
 
 
@@ -283,22 +285,37 @@ def api_import(fichier: UploadFile = File(...), options: str = Form("{}")):
         opts = json.loads(options or "{}")
     except json.JSONDecodeError:
         raise HTTPException(422, "Options invalides (JSON attendu).")
-    return services.importer_et_analyser(
+    # Enregistrement, liaison et verdict calculé tout de suite ; l'analyse du coach en tâche de fond
+    r = services.importer_et_analyser(
         _lire(fichier), fichier.filename or "fichier.json",
         muscu_detail=opts.get("muscu_detail"),
         sport_id=opts.get("sport_id") or None,
         famille=opts.get("famille") or None,
         sous_type=opts.get("sous_type") or None,
-        analyser=opts.get("analyser", True) is not False,
+        analyser=False,
         douleur=opts.get("douleur"),
         douleur_zone=opts.get("douleur_zone"),
         rpe=opts.get("rpe"),
     )
+    return _avec_analyse(r, opts.get("analyser", True) is not False, bool(opts.get("sous_type")))
+
+
+def _avec_analyse(r: dict, analyser: bool, confirme: bool = False) -> dict:
+    """Lance l'analyse LLM (tâche) d'une séance qui vient d'être créée ; jamais pour un doublon ni
+    pour une séance dont le sport reste à préciser."""
+    if analyser and not r.get("doublon") and r.get("seance") and not r.get("sport_a_preciser"):
+        r["tache"] = services.lancer_analyse(r["seance"]["id"], confirme)
+    return r
 
 
 @app.post("/api/seances_realisees")
 def api_saisir_seance(corps: dict = Body(...)):
-    return services.saisir_seance(corps, analyser=corps.get("analyser", True) is not False)
+    return _avec_analyse(services.saisir_seance(corps, analyser=False), corps.get("analyser", True) is not False)
+
+
+@app.post("/api/seances_realisees/{id_}/analyser")
+def api_analyser_seance(id_: int):
+    return services.lancer_analyse(id_)
 
 
 # Protégée comme toute l'API par la session (COACH_PASSWORD) : voir _authentification
@@ -349,7 +366,10 @@ def api_annuler_remplacement(id_: int):
 def api_preciser_sport(id_: int, corps: dict = Body(...)):
     if not isinstance(corps.get("sport_id"), str):
         raise HTTPException(422, "sport_id attendu.")
-    return services.preciser_sport(id_, corps["sport_id"], analyser=corps.get("analyser", True) is not False)
+    avant = _ou_404(db.seance(id_), "Séance")
+    r = services.preciser_sport(id_, corps["sport_id"], analyser=False)
+    # Première précision : l'analyse suspendue part maintenant
+    return _avec_analyse(r, bool(avant["sport_a_preciser"]) and corps.get("analyser", True) is not False)
 
 
 @app.get("/api/correspondances")
@@ -381,7 +401,7 @@ def api_dimanche():
 
 @app.post("/api/bilan")
 def api_bilan(imperatifs: dict = Body(...)):
-    return services.bilan_hebdo(imperatifs)
+    return services.lancer_bilan(imperatifs)
 
 
 @app.post("/api/bilan/{id_}/verifier")
@@ -465,8 +485,8 @@ def api_planifiee_supprimer(id_: int):
 # API — réajustement de la semaine par Sensei (LLM, à la demande)
 # ---------------------------------------------------------------------------
 @app.post("/api/semaine/ajuster")
-def api_semaine_ajuster():
-    return services.ajuster_semaine()
+def api_semaine_ajuster(corps: dict = Body(default={})):
+    return services.lancer_ajustement((corps or {}).get("note"))
 
 
 @app.post("/api/semaine/ajustements/{id_}/appliquer")
@@ -487,14 +507,14 @@ def api_evenements():
 @app.post("/api/evenements")
 def api_evenement_creer(e: dict = Body(...)):
     id_ = db.inserer("evenements", services.valider_evenement(e))
-    return {"evenement": db.evenement(id_), "reconstruction": services.reconstruire(id_)}
+    return {"evenement": db.evenement(id_), "tache": services.lancer_reconstruction(id_)}
 
 
 @app.put("/api/evenements/{id_}")
 def api_evenement_maj(id_: int, e: dict = Body(...)):
     _ou_404(db.evenement(id_), "Événement")
     db.maj("evenements", id_, services.valider_evenement(e))
-    return {"evenement": db.evenement(id_), "reconstruction": services.reconstruire(id_)}
+    return {"evenement": db.evenement(id_), "tache": services.lancer_reconstruction(id_)}
 
 
 @app.delete("/api/evenements/{id_}")
@@ -504,9 +524,36 @@ def api_evenement_supprimer(id_: int):
         # analyses_llm référence l'événement sans ON DELETE : on détache la trace
         c.execute("UPDATE analyses_llm SET evenement_id = NULL WHERE evenement_id = ?", (id_,))
         c.execute("DELETE FROM evenements WHERE id = ?", (id_,))
-    return {"ok": True, "reconstruction": services.reconstruire()}
+    return {"ok": True, "tache": services.lancer_reconstruction()}
 
 
 @app.post("/api/reconstruire")
 def api_reconstruire():
-    return services.reconstruire()
+    return services.lancer_reconstruction()
+
+
+# ---------------------------------------------------------------------------
+# API — tâches IA (appels LLM en tâche de fond)
+# ---------------------------------------------------------------------------
+@app.get("/api/taches")
+def api_taches(actives: int = 0, cle: Optional[str] = None):
+    if cle:
+        t = taches.derniere(cle)
+        return [t] if t else []
+    return taches.actives() if actives else []
+
+
+@app.get("/api/taches/{id_}")
+def api_tache(id_: str):
+    return _ou_404(taches.lire(id_), "Tâche")
+
+
+@app.post("/api/taches/{id_}/vue")
+def api_tache_vue(id_: str):
+    return _ou_404(taches.marquer_vue(id_), "Tâche")
+
+
+@app.post("/api/taches/{id_}/relancer")
+def api_tache_relancer(id_: str):
+    _ou_404(taches.lire(id_), "Tâche")
+    return services.relancer_tache(id_)

@@ -168,6 +168,109 @@ function coque(droiteHTML = "") {
   nav.innerHTML = ONGLETS.map(([h, i, t]) =>
     `<a href="${h}" class="${location.pathname === h ? "actif" : ""}"><i class="ti ${i}"></i>${t}</a>`).join("");
   document.body.appendChild(nav);
+  const bandeau = document.createElement("div");
+  bandeau.id = "bandeau-taches";
+  top.after(bandeau);
+  surveillerTaches();
+}
+
+// ---------------------------------------------------------------------------
+// Tâches IA : l'appel au coach tourne côté serveur ; chaque page affiche l'état au chargement
+// ---------------------------------------------------------------------------
+const TACHES = {
+  bilan_hebdo: { encours: "Sensei prépare ta semaine…", pret: "Ton plan de la semaine est prêt", page: () => "/dimanche" },
+  analyse_seance: { encours: "Sensei analyse ta séance…", pret: "L'analyse de ta séance est prête",
+    page: t => `/historique#${t.parametres?.seance_id || ""}` },
+  ajustement_semaine: { encours: "Sensei réajuste ta semaine…", pret: "Le réajustement de ta semaine est prêt", page: () => "/" },
+  reconstruction_evenements: { encours: "Sensei reconstruit ton plan…", pret: "Ton plan de prépa est à jour", page: () => "/evenements" },
+};
+const POLLING_MS = 3000;
+const tachesLocales = new Set();      // tâches suivies par la page elle-même : pas de bandeau
+
+// Attend la fin d'une tâche (polling 3 s, en pause quand la page est masquée)
+function attendreTache(id) {
+  return new Promise((resoudre, rejeter) => {
+    let essais = 0;
+    const tour = async () => {
+      if (document.hidden) { document.addEventListener("visibilitychange", tour, { once: true }); return; }
+      try {
+        const t = await api("GET", `/api/taches/${id}`);
+        essais = 0;
+        if (t.statut === "en_cours") setTimeout(tour, POLLING_MS); else resoudre(t);
+      } catch (e) {
+        if (++essais >= 5) rejeter(e); else setTimeout(tour, POLLING_MS);   // réseau instable : on insiste
+      }
+    };
+    tour();
+  });
+}
+
+// La page qui a lancé (ou qui reprend) une tâche l'affiche elle-même, puis la marque vue
+async function suivreTache(tache) {
+  tachesLocales.add(tache.id);
+  rendreBandeauTaches();
+  const t = tache.statut === "en_cours" ? await attendreTache(tache.id) : tache;
+  api("POST", `/api/taches/${t.id}/vue`).catch(() => {});
+  return t;
+}
+
+// Zone d'une page qui suit une tâche : chargeur, puis rendu(résultat), ou carte d'erreur avec « Réessayer »
+async function tacheDansZone(zone, tache, messages, rendu) {
+  chargeurIA(zone, messages);
+  let t;
+  try { t = await suivreTache(tache); } catch {
+    zone.innerHTML = `<div class="bandeau gris">Sensei travaille toujours. Tu peux changer d'onglet : le résultat t'attendra.</div>`;
+    return;
+  }
+  if (t.statut === "termine") { rendu(t.resultat); return; }
+  zone.innerHTML = "";
+  zone.appendChild(carteErreurLLM(t.resultat?.erreur_llm || { type: "tache", message: t.erreur || "Échec de l'appel au coach." }, async () => {
+    try { tacheDansZone(zone, await api("POST", `/api/taches/${t.id}/relancer`), messages, rendu); }
+    catch (e) { erreurSimple(zone, e); }
+  }));
+}
+
+let tachesActives = [], minuteurTaches = null;
+async function surveillerTaches() {
+  clearTimeout(minuteurTaches);
+  if (document.hidden) return;                       // reprise au retour (visibilitychange)
+  try { tachesActives = await api("GET", "/api/taches?actives=1"); } catch { return; }
+  rendreBandeauTaches();
+  if (tachesActives.some(t => t.statut === "en_cours")) minuteurTaches = setTimeout(surveillerTaches, POLLING_MS);
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden && $("#bandeau-taches")) surveillerTaches(); });
+
+function rendreBandeauTaches() {
+  const el = $("#bandeau-taches");
+  if (!el) return;
+  const visibles = tachesActives.filter(t => !tachesLocales.has(t.id) && TACHES[t.type]);
+  el.innerHTML = visibles.map(t => {
+    const def = TACHES[t.type];
+    if (t.statut === "en_cours") return `<div class="bandeau-tache encours"><span class="loader-s mini" aria-hidden="true">
+        <svg viewBox="22.5 21.5 57 57"><path pathLength="100" d="${TRACE_S}" fill="none" stroke="currentColor" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <span>${esc(def.encours)}</span></div>`;
+    if (t.statut === "erreur") return `<div class="bandeau-tache erreur"><span>${esc(t.erreur || "L'appel au coach a échoué.")}</span>
+        <button type="button" class="btn petit" data-relancer="${esc(t.id)}">Réessayer</button>
+        <button type="button" class="btn-icone" data-ignorer="${esc(t.id)}" aria-label="Fermer"><i class="ti ti-x"></i></button></div>`;
+    return `<div class="bandeau-tache pret"><span>${esc(def.pret)}</span>
+        <button type="button" class="btn petit" data-voir="${esc(t.id)}">Voir</button></div>`;
+  }).join("");
+  const parId = id => tachesActives.find(t => t.id === id);
+  $$("[data-voir]", el).forEach(b => b.onclick = async () => {
+    const t = parId(b.dataset.voir);
+    await api("POST", `/api/taches/${t.id}/vue`).catch(() => {});
+    const cible = TACHES[t.type].page(t);
+    if (cible === location.pathname + location.hash) location.reload(); else location.href = cible;
+  });
+  $$("[data-ignorer]", el).forEach(b => b.onclick = async () => {
+    await api("POST", `/api/taches/${b.dataset.ignorer}/vue`).catch(() => {});
+    surveillerTaches();
+  });
+  $$("[data-relancer]", el).forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    try { await api("POST", `/api/taches/${b.dataset.relancer}/relancer`); } catch (e) { alert(e.message); }
+    surveillerTaches();
+  });
 }
 
 // ---------------------------------------------------------------------------

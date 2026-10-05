@@ -80,6 +80,20 @@ async function choisirSport(opts = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// Brouillons de formulaires (localStorage, peut être indisponible : navigation privée, quota)
+// ---------------------------------------------------------------------------
+const CLE_BROUILLON_SEANCE = "brouillon_seance_manuelle";
+function lireBrouillon(cle) {
+  try { return JSON.parse(localStorage.getItem(cle) || "null"); } catch { return null; }
+}
+function ecrireBrouillon(cle, valeur) {
+  try { localStorage.setItem(cle, JSON.stringify(valeur)); } catch { /* stockage indisponible */ }
+}
+function effacerBrouillon(cle) {
+  try { localStorage.removeItem(cle); } catch { /* stockage indisponible */ }
+}
+
+// ---------------------------------------------------------------------------
 // Saisie manuelle d'une séance réalisée (sans fichier)
 // ---------------------------------------------------------------------------
 // opts : { date (ISO jour par défaut), sante ({niveau}) }. Résout avec la réponse de l'API, ou null.
@@ -131,9 +145,21 @@ async function feuilleSeanceManuelle(opts = {}) {
     // Le sélecteur s'ouvre par-dessus la saisie (feuille empilée)
     boutonSport.onclick = async () => {
       const choix = await choisirSport({ propose: sportId });
-      if (choix) { sportId = choix; rendreSport(); }
+      if (choix) { sportId = choix; rendreSport(); ecrireBrouillon(CLE_BROUILLON_SEANCE, { ...(lireBrouillon(CLE_BROUILLON_SEANCE) || {}), sport_id: choix }); }
     };
     $("[name=rpe]", form).oninput = e => { $("[data-rpe]", form).textContent = e.target.value; };
+    // Brouillon : la saisie survit à un changement d'onglet ou à la mise en veille de l'app
+    const brouillon = lireBrouillon(CLE_BROUILLON_SEANCE);
+    if (brouillon) {
+      if (brouillon.sport_id && CATALOGUE?.parId[brouillon.sport_id]) sportId = brouillon.sport_id;
+      Object.entries(brouillon.champs || {}).forEach(([k, v]) => { if (form.elements[k] && form.elements[k].type !== "checkbox") form.elements[k].value = v; });
+      $("[data-rpe]", form).textContent = form.rpe.value;
+      rendreSport();
+    }
+    const sauver = () => ecrireBrouillon(CLE_BROUILLON_SEANCE,
+      { sport_id: sportId, champs: Object.fromEntries([...new FormData(form)].filter(([k]) => k !== "analyser")) });
+    form.addEventListener("input", sauver);
+    form.addEventListener("change", sauver);
     form.onsubmit = async e => {
       e.preventDefault();
       if (!sportId) { erreurSimple($("[data-erreur]", form), new Error("Choisir un sport.")); return; }
@@ -145,6 +171,7 @@ async function feuilleSeanceManuelle(opts = {}) {
       bouton.textContent = corps.analyser ? "Analyse en cours…" : "Enregistrement…";
       try {
         const resultat = await api("POST", "/api/seances_realisees", corps);
+        effacerBrouillon(CLE_BROUILLON_SEANCE);
         terminer(resultat);
         d.close();
       } catch (err) {

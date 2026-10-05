@@ -20,6 +20,7 @@ import db
 import extractor
 import metrics
 import sports
+import taches
 from sources import strava, suunto_json
 from sources.base import RICHESSE_SOURCE, ActiviteNormalisee
 
@@ -1422,7 +1423,7 @@ def valider_ajustement(reponse: dict, lundi: date, premier: date) -> list[str]:
     return violations
 
 
-def ajuster_semaine() -> dict:
+def ajuster_semaine(note: Optional[str] = None) -> dict:
     d = aujourdhui()
     lundi = lundi_de(d)
     dimanche = lundi + timedelta(days=6)
@@ -1441,6 +1442,7 @@ def ajuster_semaine() -> dict:
         "modifications": db.etat_semaine(du)["modifications"],
         "realise": [{**_seance_llm(s), "verdict": s.get("verdict")} for s in db.seances_entre(du, au)],
         "imperatifs": {k: imp.get(k) for k in ("squash_jours", "contraintes", "ressenti", "sommeil", "notes")},
+        **({"demande_athlete": note.strip()} if note and note.strip() else {}),
     }
     erreur_precedente, analyse_id, violations = None, None, []
     for _ in range(2):                         # un seul nouvel essai, avec l'erreur en contexte
@@ -1935,13 +1937,9 @@ def verifier_regles(seances: list[dict], jour_repos: Optional[str] = None, lundi
     return {"bloquantes": bloquantes, "avertissements": avert}
 
 
-def bilan_hebdo(imperatifs: dict) -> dict:
-    lundi = date.fromisoformat(imperatifs.get("semaine_debut") or semaine_a_planifier().isoformat())
-    lundi = lundi_de(lundi)
-    lundi_prec = lundi - timedelta(weeks=1)
-    dimanche_prec = lundi - timedelta(days=1)
-
-    # 1. Impératifs
+def enregistrer_imperatifs(imperatifs: dict) -> tuple[date, dict]:
+    """Valide et enregistre les impératifs de la semaine et le statut santé. Retourne (lundi, santé)."""
+    lundi = lundi_de(date.fromisoformat(imperatifs.get("semaine_debut") or semaine_a_planifier().isoformat()))
     if isinstance(imperatifs.get("sante"), dict):
         nouvelle_sante = imperatifs["sante"]
     else:                                          # ancien format « vigilance:<zone> »
@@ -1962,7 +1960,14 @@ def bilan_hebdo(imperatifs: dict) -> dict:
         "sommeil": int(imperatifs["sommeil"]) if imperatifs.get("sommeil") else None,
         "notes": (imperatifs.get("notes") or "").strip() or None,
     })
-    sante = enregistrer_sante(nouvelle_sante)
+    return lundi, enregistrer_sante(nouvelle_sante)
+
+
+def bilan_hebdo(imperatifs: dict) -> dict:
+    # 1. Impératifs
+    lundi, sante = enregistrer_imperatifs(imperatifs)
+    lundi_prec = lundi - timedelta(weeks=1)
+    dimanche_prec = lundi - timedelta(days=1)
     statut = texte_sante_llm(sante)
 
     # 2. Chargement
@@ -2127,3 +2132,52 @@ def reconstruire(evenement_id: Optional[int] = None) -> dict:
 
     return {"analyse_id": analyse_id, "reponse": reponse, "erreur_llm": erreur,
             "plan_prepa": db.plan_prepa(), "bascule_proposee": bascule}
+
+
+# ---------------------------------------------------------------------------
+# Tâches IA (backend/taches.py) : chaque appel LLM tourne en tâche de fond
+# ---------------------------------------------------------------------------
+FONCTIONS_TACHES = {
+    "analyse_seance": lambda p: analyser_seance(p["seance_id"], True, bool(p.get("confirme"))),
+    "bilan_hebdo": lambda p: bilan_hebdo(p["imperatifs"]),
+    "ajustement_semaine": lambda p: ajuster_semaine(p.get("note")),
+    "reconstruction_evenements": lambda p: reconstruire(p.get("evenement_id")),
+}
+
+
+def lancer_analyse(seance_id: int, confirme: bool = False) -> dict:
+    s = _seance_ou_erreur(seance_id)
+    if s["sport_a_preciser"]:
+        raise ValueError("Précise d'abord le sport de la séance.")
+    return taches.lancer("analyse_seance", f"analyse_seance:{seance_id}",
+                         {"seance_id": seance_id, "confirme": confirme}, FONCTIONS_TACHES["analyse_seance"])
+
+
+def lancer_bilan(imperatifs: dict) -> dict:
+    """Saisie validée et enregistrée tout de suite (erreur immédiate si invalide), LLM en tâche de fond."""
+    lundi, _ = enregistrer_imperatifs(imperatifs)
+    return taches.lancer("bilan_hebdo", f"bilan_hebdo:{lundi.isoformat()}",
+                         {"imperatifs": {**imperatifs, "semaine_debut": lundi.isoformat()}},
+                         FONCTIONS_TACHES["bilan_hebdo"])
+
+
+def lancer_ajustement(note: Optional[str] = None) -> dict:
+    d = aujourdhui()
+    lundi = lundi_de(d)
+    if _premier_jour_modifiable(d) > lundi + timedelta(days=6):
+        raise ValueError("Plus aucun jour à réajuster cette semaine.")
+    return taches.lancer("ajustement_semaine", f"ajustement_semaine:{lundi.isoformat()}", {"note": note},
+                         FONCTIONS_TACHES["ajustement_semaine"])
+
+
+def lancer_reconstruction(evenement_id: Optional[int] = None) -> dict:
+    # Une reconstruction en cours a lu les événements avant ce changement : elle sera rejouée
+    return taches.lancer("reconstruction_evenements", "reconstruction_evenements", {"evenement_id": evenement_id},
+                         FONCTIONS_TACHES["reconstruction_evenements"], rejouer_si_en_cours=True)
+
+
+def relancer_tache(id_: str) -> dict:
+    t = taches.lire(id_)
+    if not t:
+        raise ValueError("Tâche introuvable.")
+    return taches.relancer(id_, FONCTIONS_TACHES[t["type"]])

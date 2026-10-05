@@ -31,5 +31,7 @@ def base_vide(tmp_path, monkeypatch):
     import services
     monkeypatch.setattr(llm_client, "FICHIER_COMPTEUR", tmp_path / "usage_llm.json")
     monkeypatch.setattr(services, "_llm", SansLLM())
+    import taches
+    monkeypatch.setattr(taches, "SYNCHRONE", True)     # les tâches IA s'exécutent dans le test
     db.init_db()
     yield tmp_path

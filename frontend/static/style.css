@@ -526,3 +526,15 @@ button.badge { font-family: inherit; }
 .progression { height: 4px; border-radius: 2px; background: var(--bg-surface); margin-top: 5px; overflow: hidden; }
 .progression > div { height: 100%; background: var(--accent); border-radius: 2px; }
 .bilan-faits { margin: 12px 0 0; padding-left: 16px; }
+
+/* ---- Bandeau des tâches IA (sous la top bar, toutes les pages) ------------------------------ */
+#bandeau-taches { position: sticky; top: 0; z-index: 20; }
+#bandeau-taches:empty { display: none; }
+.bandeau-tache { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 8px;
+  border-radius: var(--radius-sm); font-size: 12px; font-weight: 500; }
+.bandeau-tache > span:not(.loader-s) { flex: 1; min-width: 0; }
+.bandeau-tache.encours { background: var(--bg-surface); color: var(--text-secondary); }
+.bandeau-tache.pret { background: var(--accent-dim); color: var(--accent-light); }
+.bandeau-tache.erreur { background: var(--red-dim); color: var(--red); }
+.loader-s.mini { width: 18px; height: 18px; flex-shrink: 0; margin: 0; }
+.loader-s.mini svg { width: 18px; height: 18px; }

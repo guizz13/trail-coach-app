@@ -22,7 +22,7 @@ $("#saisie-manuelle").onclick = async () => {
         <div class="seance-detail">${esc(dateFR(s.date_debut, { weekday: "long", day: "numeric", month: "long" }))} · ${esc(heure(s.date_debut))} · saisie manuelle</div></div></div>
     <div class="resultat"></div>`;
   $("#cartes").prepend(el);
-  afficherResultat($(".resultat", el), r, true);
+  afficherAvecAnalyse($(".resultat", el), r);
 };
 
 const SOURCES_SEANCE = { manuel: "saisie manuelle", strava: "Strava", suunto_json: "fichier Suunto" };
@@ -161,7 +161,7 @@ function carte(a, fichier, brut) {
       const r = await api("POST", "/api/import", envoi);
       if (!r.doublon && trace) stockage.ecrire("trace:" + r.seance.fichier_hash, trace);
       form.remove();
-      afficherResultat(res, r, opts.analyser);
+      afficherAvecAnalyse(res, r);
     } catch (err) {
       bouton.disabled = false;
       res.innerHTML = "";
@@ -169,6 +169,16 @@ function carte(a, fichier, brut) {
     }
   };
   return el;
+}
+
+// Verdict calculé affiché tout de suite ; l'analyse du coach arrive par sa tâche de fond
+function afficherAvecAnalyse(el, r) {
+  afficherResultat(el, r, !!r.tache);
+  if (!r.tache) return;
+  const zone = document.createElement("div");
+  zone.style.marginTop = "8px";
+  el.appendChild(zone);
+  tacheDansZone(zone, r.tache, MESSAGES_ANALYSE, res => { zone.remove(); afficherResultat(el, res, true); });
 }
 
 function afficherResultat(el, r, analyseDemandee) {
@@ -220,7 +230,7 @@ function sportAPreciser(el, r, analyseDemandee) {
     if (analyseDemandee) chargeurIA(el, MESSAGES_ANALYSE); else reflexion(el, "Enregistrement…");
     try {
       const res = await api("POST", `/api/seances_realisees/${r.seance.id}/sport`, { sport_id: id, analyser: analyseDemandee });
-      afficherResultat(el, res, analyseDemandee);
+      afficherAvecAnalyse(el, res);
     } catch (e) { erreurSimple(el, e); }
   };
   $("[data-preciser]", el).onclick = ouvrir;

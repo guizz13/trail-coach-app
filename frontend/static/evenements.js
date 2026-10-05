@@ -244,20 +244,32 @@ function ouvrirModale(e) {
   };
 }
 
-// Chaque modification déclenche la reconstruction du plan par le coach
+// Chaque modification déclenche la reconstruction du plan par le coach (tâche de fond)
 async function executer(promesse, apres) {
   const zone = $("#reconstruction");
   chargeurIA(zone);
   zone.scrollIntoView({ behavior: "smooth", block: "center" });
+  let r;
   try {
-    const r = await promesse;
+    r = await promesse;
     apres && apres(r);
     await charger();
-    afficherReconstruction(r.reconstruction || r);
   } catch (err) {
     zone.innerHTML = "";
     zone.appendChild(carteErreurLLM({ type: "reseau", message: err.message }));
+    return;
   }
+  suivreReconstruction(r.tache || r);
+}
+
+function suivreReconstruction(tache) {
+  tacheDansZone($("#reconstruction"), tache, loadingMessages, async res => { await charger(); afficherReconstruction(res); });
+}
+
+// Reprise : une reconstruction lancée avant de quitter la page (en cours, ou prête et pas encore vue)
+async function reprendreReconstruction() {
+  const [t] = await api("GET", "/api/taches?cle=reconstruction_evenements");
+  if (t && (t.statut === "en_cours" || !t.vue)) suivreReconstruction(t);
 }
 
 function afficherReconstruction(r) {
@@ -283,4 +295,4 @@ function afficherReconstruction(r) {
 
 $("#reconstruire").onclick = () => executer(api("POST", "/api/reconstruire"));
 $("#ajouter").onclick = () => ouvrirModale(null);
-charger().catch(e => erreurSimple($("#principal"), e));
+charger().then(reprendreReconstruction).catch(e => erreurSimple($("#principal"), e));
