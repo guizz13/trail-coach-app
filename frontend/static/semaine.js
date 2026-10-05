@@ -146,40 +146,10 @@ function rendreVolume(courante, realisees) {
   $("#cout").textContent = `Sensei ${deux(c.cout_usd)} $ / ${deux(c.plafond_usd)} $ ce mois`;
 }
 
-// ---- Bilan de la semaine : réalisé / prévu par catégorie, décalages, remplacements ---------------
-const RESPECT = { respectee: ["vert", "Semaine respectée"], partielle: ["orange", "Partiellement respectée"],
-  non_respectee: ["rouge", "Non respectée"] };
-
+// ---- Bilan de la semaine : réalisé / prévu par catégorie (carte partagée, app.js) ---------------
 function rendreBilanSemaine(b) {
-  const el = $("#bilan-semaine");
-  const cats = Object.entries(b.par_categorie || {});
-  if (!cats.length) { el.innerHTML = ""; return; }
-  const ordre = Object.keys(CATALOGUE?.categories || {});
-  cats.sort(([a], [c]) => ordre.indexOf(a) - ordre.indexOf(c));
-  const [classe, texte] = RESPECT[b.respect_global] || ["", "Rien de prévu"];
-  const jourCourt = iso => dateFR(iso, { weekday: "short" });
-  const lignes = cats.map(([c, v]) => {
-    const pct = v.prevu_min ? Math.min(100, Math.round(100 * v.realise_min / v.prevu_min)) : (v.realise_min ? 100 : 0);
-    return `<div class="bilan-cat">
-      <span class="disc ${esc(c)}"><i class="ti ${esc(CATALOGUE?.categories[c]?.icone || "ti-activity")}"></i></span>
-      <div class="seance-corps">
-        <div class="ligne entre"><span class="seance-type">${esc(libelleCategorie(c))}</span>
-          <span class="sous-texte">${v.realise_seances}/${v.prevu_seances} séance${v.prevu_seances > 1 ? "s" : ""} · ${v.realise_min}/${v.prevu_min} min</span></div>
-        <div class="progression"><div style="width:${pct}%"></div></div>
-      </div></div>`;
-  }).join("");
-  const faits = [
-    ...b.decalages.map(x => `Décalage : ${esc(x.seance)}, ${esc(jourCourt(x.de))} → ${esc(jourCourt(x.a))}`),
-    ...b.remplacements.map(x => `${esc(x.par)} à la place de ${esc(x.remplace.join(" + "))}`),
-  ];
-  el.innerHTML = `<div class="section-label">Bilan de la semaine</div>
-    <div class="carte">
-      <div class="ligne entre" style="margin-bottom:10px"><span class="sous-texte">Charge ${nb(b.charge_totale.realise)} / ${nb(b.charge_totale.prevu)} prévue</span>
-        <span class="badge ${classe}">${texte}</span></div>
-      ${lignes}
-      ${faits.length ? `<ul class="sous-texte bilan-faits">${faits.map(f => `<li>${f}</li>`).join("")}</ul>` : ""}
-      ${b.alerte ? `<div class="bandeau orange" style="margin-top:10px">${esc(b.alerte)}</div>` : ""}
-    </div>`;
+  const html = bilanSemaineHTML(b);
+  $("#bilan-semaine").innerHTML = html ? `<div class="section-label">Bilan de la semaine</div>${html}` : "";
 }
 
 function rendrePlanning(jours, realisees, verdicts) {

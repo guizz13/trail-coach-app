@@ -1937,11 +1937,57 @@ def verifier_regles(seances: list[dict], jour_repos: Optional[str] = None, lundi
     return {"bloquantes": bloquantes, "avertissements": avert}
 
 
+CONTRAINTES_JOUR = {"indispo_matin": "Indispo matin", "indispo_soir": "Indispo soir",
+                    "journee_chargee": "Journée chargée", "deplacement": "Déplacement",
+                    "repos_souhaite": "Repos souhaité"}
+CRENEAUX_SQUASH = ("matin", "midi", "soir", "journee")
+JOURS_SORTIE_LONGUE = ("samedi", "dimanche", "indifferent")
+NOTE_MAX = 200
+ECART_TENDANCE_VFC = 5          # % d'écart à la moyenne sur 4 semaines pour parler de hausse / baisse
+
+
+def _entier(v, nom: str, bas: int, haut: int) -> Optional[int]:
+    if v in (None, ""):
+        return None
+    try:
+        n = int(float(v))
+    except (TypeError, ValueError):
+        raise ValueError(f"{nom} : nombre attendu.")
+    if not bas <= n <= haut:
+        raise ValueError(f"{nom} doit être entre {bas} et {haut}.")
+    return n
+
+
+def _jour(j) -> str:
+    j = (j or "").lower()
+    if j not in JOURS:
+        raise ValueError(f"Jour invalide : {j}")
+    return j
+
+
+def _valider_contraintes(contraintes: list) -> list[dict]:
+    """Nouveau format : [{"jour", "contraintes": [codes]}] ; l'ancien ({jour, creneau, raison}) reste accepté."""
+    out = []
+    for c in contraintes or []:
+        if not isinstance(c, dict):
+            continue
+        if "contraintes" in c:
+            codes = [x for x in c.get("contraintes") or [] if x in CONTRAINTES_JOUR]
+            if codes:
+                out.append({"jour": _jour(c.get("jour")), "contraintes": codes})
+        elif (c.get("raison") or "").strip():
+            out.append({"jour": _jour(c.get("jour")), "creneau": c.get("creneau"), "raison": c["raison"].strip()})
+    return out
+
+
 def enregistrer_imperatifs(imperatifs: dict) -> tuple[date, dict]:
-    """Valide et enregistre les impératifs de la semaine et le statut santé. Retourne (lundi, santé)."""
+    """Valide et enregistre les impératifs de la semaine et le statut santé. Retourne (lundi, santé).
+    Sans « sante » (bouton « Rien de changé »), le statut actuel est conservé."""
     lundi = lundi_de(date.fromisoformat(imperatifs.get("semaine_debut") or semaine_a_planifier().isoformat()))
     if isinstance(imperatifs.get("sante"), dict):
         nouvelle_sante = imperatifs["sante"]
+    elif "sante" in imperatifs or "statut_sante" not in imperatifs:
+        nouvelle_sante = None
     else:                                          # ancien format « vigilance:<zone> »
         statut = (imperatifs.get("statut_sante") or "100%").strip()
         if not (statut == "100%" or statut.startswith(("vigilance:", "blessure:"))):
@@ -1949,18 +1995,99 @@ def enregistrer_imperatifs(imperatifs: dict) -> tuple[date, dict]:
         niveau, _, note = statut.partition(":")
         nouvelle_sante = {"niveau": "100" if statut == "100%" else niveau,
                           "zones": db.zones_depuis_texte(note), "note": note or None}
-    for k in ("ressenti", "sommeil"):
-        v = imperatifs.get(k)
-        if v not in (None, "") and not 1 <= int(v) <= 10:
-            raise ValueError(f"{k} doit être entre 1 et 10.")
+    squash = []
+    for x in imperatifs.get("squash") or []:
+        if isinstance(x, dict):
+            creneau = x.get("creneau") or "soir"
+            if creneau not in CRENEAUX_SQUASH:
+                raise ValueError(f"Créneau de squash invalide : {creneau}")
+            squash.append({"jour": _jour(x.get("jour")), "creneau": creneau})
+    sl = imperatifs.get("sortie_longue") or None
+    if sl:
+        if (sl.get("jour") or "indifferent") not in JOURS_SORTIE_LONGUE:
+            raise ValueError("Jour de sortie longue : samedi, dimanche ou indifférent.")
+        sl = {"jour": sl.get("jour") or "indifferent", "duree_max_min": _entier(sl.get("duree_max_min"), "Durée max", 30, 480)}
+    autres = []
+    for x in imperatifs.get("autres_sports") or []:
+        if isinstance(x, dict) and x.get("sport_id"):
+            autres.append({"jour": _jour(x.get("jour")), "sport_id": _sport_valide(x["sport_id"]),
+                           **({"duree_min": _entier(x["duree_min"], "Durée", 5, 600)} if x.get("duree_min") else {})})
+    note = (imperatifs.get("notes") or "").strip() or None
+    if note and len(note) > NOTE_MAX:
+        raise ValueError(f"Note pour Sensei : {NOTE_MAX} caractères maximum.")
+    vfc = imperatifs.get("vfc_ms")
+    if vfc not in (None, ""):
+        try:
+            vfc = round(float(str(vfc).replace(",", ".")), 1)
+        except ValueError:
+            raise ValueError("VFC : nombre attendu (ms).")
+        if not 10 <= vfc <= 250:
+            raise ValueError("VFC : valeur entre 10 et 250 ms.")
+    else:
+        vfc = None
     db.sauver_imperatifs(lundi.isoformat(), {
-        "squash_jours": imperatifs.get("squash") or [],
-        "contraintes": imperatifs.get("contraintes") or [],
-        "ressenti": int(imperatifs["ressenti"]) if imperatifs.get("ressenti") else None,
-        "sommeil": int(imperatifs["sommeil"]) if imperatifs.get("sommeil") else None,
-        "notes": (imperatifs.get("notes") or "").strip() or None,
+        "squash_jours": squash,
+        "contraintes": _valider_contraintes(imperatifs.get("contraintes")),
+        "ressenti": _entier(imperatifs.get("ressenti"), "ressenti", 1, 10),
+        "sommeil": _entier(imperatifs.get("sommeil"), "sommeil", 1, 10),
+        "fatigue_pro": _entier(imperatifs.get("fatigue_pro"), "fatigue pro", 1, 10),
+        "vfc_ms": vfc,
+        "douleur_max": _entier(imperatifs.get("douleur_max"), "douleur max", 0, 10),
+        "sortie_longue": sl,
+        "autres_sports": autres,
+        "notes": note,
     })
-    return lundi, enregistrer_sante(nouvelle_sante)
+    return lundi, enregistrer_sante(nouvelle_sante) if nouvelle_sante is not None else sante_profil()
+
+
+def _vfc_precedentes(lundi: date) -> list[float]:
+    return [r["vfc_ms"] for r in db.fetch_all(
+        "SELECT vfc_ms FROM imperatifs_semaine WHERE semaine_debut < ? AND vfc_ms IS NOT NULL "
+        "ORDER BY semaine_debut DESC LIMIT 4", (lundi.isoformat(),))]
+
+
+def vfc_moyenne_4_semaines(lundi: date) -> Optional[float]:
+    v = _vfc_precedentes(lundi)
+    return round(sum(v) / len(v), 1) if v else None
+
+
+def tendance_vfc(lundi: date, valeur: Optional[float]) -> Optional[dict]:
+    """VFC de la semaine comparée à la moyenne des 4 dernières semaines saisies (hausse / stable / baisse)."""
+    if valeur is None:
+        return None
+    precedentes = _vfc_precedentes(lundi)
+    if not precedentes:
+        return {"valeur_ms": valeur, "moyenne_4_semaines_ms": None, "ecart_pct": None, "tendance": None,
+                "semaines_de_reference": 0}
+    moyenne = sum(precedentes) / len(precedentes)
+    ecart = round((valeur - moyenne) / moyenne * 100, 1)
+    tendance = "hausse" if ecart > ECART_TENDANCE_VFC else "baisse" if ecart < -ECART_TENDANCE_VFC else "stable"
+    return {"valeur_ms": valeur, "moyenne_4_semaines_ms": round(moyenne, 1), "ecart_pct": ecart,
+            "tendance": tendance, "semaines_de_reference": len(precedentes)}
+
+
+def imperatifs_pour_llm(lundi: date) -> dict:
+    """Impératifs enregistrés, mis en forme pour bilan_hebdo (libellés, sports, tendance VFC)."""
+    imp = db.imperatifs(lundi.isoformat()) or {}
+    contraintes = []
+    for c in imp.get("contraintes") or []:
+        if "contraintes" in c:
+            contraintes.append({"jour": c["jour"], "contraintes": [CONTRAINTES_JOUR[x] for x in c["contraintes"]]})
+        else:
+            contraintes.append(c)
+    return {
+        "semaine_du": lundi.isoformat(),
+        "squash": imp.get("squash_jours") or [],
+        "contraintes": contraintes,
+        "ressenti": imp.get("ressenti"), "sommeil": imp.get("sommeil"), "fatigue_pro": imp.get("fatigue_pro"),
+        "vfc": tendance_vfc(lundi, imp.get("vfc_ms")),
+        "douleur_max_semaine_ecoulee": imp.get("douleur_max"),
+        "sortie_longue": imp.get("sortie_longue"),
+        "autres_sports_prevus": [{**x, "sport": sports.sport(x["sport_id"])["libelle"],
+                                  "categorie": sports.categorie(x["sport_id"]), "impact": sports.impact(x["sport_id"])}
+                                 for x in imp.get("autres_sports") or []],
+        "notes": imp.get("notes"),
+    }
 
 
 def bilan_hebdo(imperatifs: dict) -> dict:
@@ -1991,13 +2118,7 @@ def bilan_hebdo(imperatifs: dict) -> dict:
         # Le plan transmis est le plan tel que modifié ; voici ce qui a changé
         "modifications_du_plan": db.etat_semaine(lundi_prec.isoformat())["modifications"],
     }
-    imperatifs_llm = {
-        "semaine_du": lundi.isoformat(),
-        "squash": imperatifs.get("squash") or [],
-        "contraintes": imperatifs.get("contraintes") or [],
-        "ressenti": imperatifs.get("ressenti"), "sommeil": imperatifs.get("sommeil"),
-        "notes": imperatifs.get("notes"),
-    }
+    imperatifs_llm = imperatifs_pour_llm(lundi)
 
     # 4-5. LLM + trace ; en vigilance sans protocole, un nouvel essai si le volume de course dépasse +10 %
     historique = resume_semaines(4, lundi_prec)
@@ -2135,12 +2256,127 @@ def reconstruire(evenement_id: Optional[int] = None) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Préparer (parcours en étapes) : données de la page, proposition en attente, ajustement
+# ---------------------------------------------------------------------------
+def proposition_bilan(a: dict) -> dict:
+    """Bilan généré (analyses_llm), au format renvoyé par bilan_hebdo, règles dures revérifiées."""
+    rep = a["reponse_json"] if isinstance(a["reponse_json"], dict) else {}
+    sem = rep.get("semaine_suivante") or {}
+    lundi = date.fromisoformat(a["semaine_debut"])
+    return {"analyse_id": a["id"], "semaine_debut": a["semaine_debut"], "reponse": rep, "erreur_llm": None,
+            "regles": verifier_regles(sem.get("seances") or [], sem.get("jour_repos"), lundi),
+            "valide": bool(a["valide_par_user"]), "cree_le": a["cree_le"]}
+
+
+def proposition_en_attente(lundi: date) -> Optional[dict]:
+    """Dernier bilan généré pour cette semaine, s'il n'a pas encore été validé."""
+    a = db.fetch_one("SELECT * FROM analyses_llm WHERE type_appel = 'bilan_hebdo' AND semaine_debut = ? "
+                     "ORDER BY id DESC LIMIT 1", (lundi.isoformat(),))
+    if not a or a["valide_par_user"] or not isinstance(a["reponse_json"], dict) \
+            or "semaine_suivante" not in a["reponse_json"]:
+        return None
+    return proposition_bilan(a)
+
+
+def donnees_preparer(semaine: Optional[str] = None) -> dict:
+    """Tout ce que le parcours Préparer pré-remplit : semaine écoulée, saisie (ou celle de la semaine
+    précédente), santé, compétitions de squash, VFC de référence, proposition et tâche en cours."""
+    lundi = lundi_de(date.fromisoformat(semaine)) if semaine else semaine_a_planifier()
+    ecoulee = lundi - timedelta(weeks=1)
+    jour = aujourdhui().isoformat()
+    remplacees = db.planifiees_remplacees()
+    sans_donnees = [libelle_court(p) for p in db.planifiees_entre(ecoulee.isoformat(), (lundi - timedelta(days=1)).isoformat())
+                    if p["type"] != "repos" and p["seance_realisee_id"] is None and p["id"] not in remplacees
+                    and p["date_seance"] <= jour]
+    competitions = [e for e in db.evenements(depuis=lundi.isoformat())
+                    if e["type"] == "squash_competition" and e["date_evt"] <= (lundi + timedelta(days=6)).isoformat()]
+    tache = taches.derniere(f"bilan_hebdo:{lundi.isoformat()}")
+    base = lundi_de(aujourdhui())
+    return {
+        "semaine_debut": lundi.isoformat(),
+        "semaines_possibles": [(base + timedelta(weeks=k)).isoformat() for k in range(3)],
+        "jours": JOURS,
+        "bilan_semaine": bilan_semaine(ecoulee),
+        "sans_donnees": sans_donnees,
+        "imperatifs": db.imperatifs(lundi.isoformat()),
+        "imperatifs_precedents": db.imperatifs(ecoulee.isoformat()),
+        "profil": db.profil(),
+        "sante": {**sante_profil(), **sante_libelle_court(sante_profil())},
+        "competitions": competitions,
+        "vfc_moyenne_4_semaines": vfc_moyenne_4_semaines(lundi),
+        "contraintes_possibles": CONTRAINTES_JOUR,
+        "proposition": proposition_en_attente(lundi),
+        "tache": tache if tache and (tache["statut"] == "en_cours" or not tache["vue"]) else None,
+    }
+
+
+def ajuster_proposition(analyse_id: int, note: Optional[str] = None) -> dict:
+    """« Ajuster » une semaine générée mais pas encore validée : ajustement_semaine sur toute la
+    semaine, avec la demande de l'athlète. La proposition ajustée remplace la précédente dans le
+    bilan ; rien n'est écrit dans seances_planifiees avant « Valider »."""
+    a = db.analyse(analyse_id)
+    if not a or a["type_appel"] != "bilan_hebdo" or not isinstance(a["reponse_json"], dict) \
+            or "semaine_suivante" not in a["reponse_json"]:
+        raise ValueError("Bilan introuvable.")
+    if a["valide_par_user"]:
+        raise ValueError("Ce plan est déjà validé : utilise « Réajuster » dans l'onglet Semaine.")
+    lundi = date.fromisoformat(a["semaine_debut"])
+    rep = a["reponse_json"]
+    sem = rep["semaine_suivante"]
+    seances = [s for s in sem.get("seances") or [] if isinstance(s, dict)]
+    jours = [(lundi + timedelta(days=i)).isoformat() for i in range(7)]
+    p = db.profil()
+    contexte = {
+        "semaine_du": lundi.isoformat(),
+        "premier_jour_modifiable": lundi.isoformat(),
+        "jours_restants": jours,
+        "proposition_non_validee": True,
+        "plan_actuel": [{**s, "date": jours[JOURS.index(s["jour"].lower())]} for s in seances
+                        if (s.get("jour") or "").lower() in JOURS],
+        "jour_repos": sem.get("jour_repos"),
+        "modifications": [],
+        "realise": [],
+        "imperatifs": imperatifs_pour_llm(lundi),
+        **({"demande_athlete": note.strip()} if note and note.strip() else {}),
+    }
+    erreur_precedente, violations = None, []
+    for _ in range(2):
+        ctx = {**contexte, **({"erreur_tentative_precedente": erreur_precedente} if erreur_precedente else {})}
+        reponse, erreur, trace = _appel_llm("ajustement_semaine", lambda llm: llm.ajustement_semaine(
+            contexte=ctx, profil=_profil_llm(p), statut_sante=texte_sante_llm(sante_profil(p)),
+            mode=p.get("mode_actif", "BASE")))
+        _tracer("ajustement_semaine", reponse, erreur, trace, semaine_debut=lundi.isoformat())
+        if reponse is None:
+            return {"ok": False, "erreur_llm": erreur}
+        proposes = _seances_proposees(reponse)
+        nouvelles = [s for s in seances if jours[JOURS.index(s["jour"].lower())] not in proposes]
+        for d_iso, liste in proposes.items():
+            if d_iso not in jours:
+                continue
+            nouvelles += [{"jour": JOURS[jours.index(d_iso)], "creneau": x.get("creneau") or "matin",
+                           "type": x.get("type"), "duree_min": x.get("duree_min"), "distance_km": x.get("distance_km"),
+                           "intensite": x.get("intensite"), "detail": x.get("description") or x.get("detail")}
+                          for x in liste]
+        regles = verifier_regles(nouvelles, sem.get("jour_repos"), lundi)
+        violations = regles["bloquantes"]
+        if not violations:
+            rep = {**rep, "semaine_suivante": {**sem, "seances": nouvelles},
+                   "ajustement_proposition": {"note": note, "changements": reponse.get("changements") or [],
+                                              "message_coach": reponse.get("message_coach")}}
+            db.maj("analyses_llm", analyse_id, {"reponse_json": rep})
+            return {"ok": True, **proposition_bilan(db.analyse(analyse_id))}
+        erreur_precedente = "Règles violées, corrige-les : " + " ; ".join(violations)
+    return {"ok": False, "message": MESSAGE_AJUSTEMENT_INVALIDE, "violations": violations}
+
+
+# ---------------------------------------------------------------------------
 # Tâches IA (backend/taches.py) : chaque appel LLM tourne en tâche de fond
 # ---------------------------------------------------------------------------
 FONCTIONS_TACHES = {
     "analyse_seance": lambda p: analyser_seance(p["seance_id"], True, bool(p.get("confirme"))),
     "bilan_hebdo": lambda p: bilan_hebdo(p["imperatifs"]),
-    "ajustement_semaine": lambda p: ajuster_semaine(p.get("note")),
+    "ajustement_semaine": lambda p: (ajuster_proposition(p["analyse_id"], p.get("note")) if p.get("analyse_id")
+                                     else ajuster_semaine(p.get("note"))),
     "reconstruction_evenements": lambda p: reconstruire(p.get("evenement_id")),
 }
 
@@ -2181,3 +2417,13 @@ def relancer_tache(id_: str) -> dict:
     if not t:
         raise ValueError("Tâche introuvable.")
     return taches.relancer(id_, FONCTIONS_TACHES[t["type"]])
+
+
+def lancer_ajustement_proposition(analyse_id: int, note: Optional[str] = None) -> dict:
+    a = db.analyse(analyse_id)
+    if not a or a["type_appel"] != "bilan_hebdo":
+        raise ValueError("Bilan introuvable.")
+    if a["valide_par_user"]:
+        raise ValueError("Ce plan est déjà validé : utilise « Réajuster » dans l'onglet Semaine.")
+    return taches.lancer("ajustement_semaine", f"ajustement_semaine:proposition:{analyse_id}",
+                         {"analyse_id": analyse_id, "note": note}, FONCTIONS_TACHES["ajustement_semaine"])

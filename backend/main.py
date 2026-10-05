@@ -190,7 +190,7 @@ def logout():
 # ---------------------------------------------------------------------------
 # Pages
 # ---------------------------------------------------------------------------
-PAGES = {"/": "index.html", "/import": "import.html", "/dimanche": "dimanche.html",
+PAGES = {"/": "index.html", "/import": "import.html", "/preparer": "preparer.html",
          "/evenements": "evenements.html", "/historique": "historique.html"}
 
 
@@ -200,6 +200,11 @@ def _servir(fichier: str):
 
 for _chemin, _fichier in PAGES.items():
     app.add_api_route(_chemin, _servir(_fichier), methods=["GET"], include_in_schema=False)
+
+@app.get("/dimanche", include_in_schema=False)
+def _ancienne_page_preparer():
+    return RedirectResponse("/preparer", status_code=301)
+
 
 app.mount("/static", StaticFiles(directory=FRONTEND / "static"), name="static")
 
@@ -397,6 +402,16 @@ def api_dimanche():
     lundi = services.semaine_a_planifier()
     return {"semaine_debut": lundi.isoformat(), "imperatifs": db.imperatifs(lundi.isoformat()),
             "profil": db.profil(), "jours": services.JOURS}
+
+
+@app.get("/api/preparer")
+def api_preparer(semaine: Optional[str] = None):
+    return services.donnees_preparer(semaine)
+
+
+@app.post("/api/bilan/{id_}/ajuster")
+def api_bilan_ajuster(id_: int, corps: dict = Body(default={})):
+    return services.lancer_ajustement_proposition(id_, (corps or {}).get("note"))
 
 
 @app.post("/api/bilan")

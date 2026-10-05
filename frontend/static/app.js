@@ -76,7 +76,7 @@ function feuilleSante(s) {
     ${s.note ? `<div class="section-label">Note</div><p class="secondaire" style="margin:0">${esc(s.note)}</p>` : ""}
     ${s.protocole ? `<div class="section-label">Protocole kiné</div><p class="secondaire" style="margin:0">${esc(s.protocole)}</p>` : ""}
     ${!s.note && !s.protocole && s.niveau === "100" ? `<p class="secondaire">Aucune restriction.</p>` : ""}
-    <a class="btn petit" href="/dimanche" style="margin-top:14px"><i class="ti ti-adjustments"></i>Modifier dans Préparer</a>`);
+    <a class="btn petit" href="/preparer" style="margin-top:14px"><i class="ti ti-adjustments"></i>Modifier dans Préparer</a>`);
 }
 const GROUPES = { pectoraux: "Pectoraux", triceps: "Triceps", epaules: "Épaules", dos: "Dos", biceps: "Biceps",
   cuisses: "Cuisses", ischios: "Ischios", mollets: "Mollets", abdos: "Abdos" };
@@ -147,7 +147,7 @@ function joursEntre(a, b) { return Math.round((dateLocale(b) - dateLocale(a)) / 
 // Coque : top bar + tab bar
 // ---------------------------------------------------------------------------
 const ONGLETS = [["/", "ti-calendar", "Semaine"], ["/import", "ti-upload", "Import"],
-  ["/dimanche", "ti-adjustments", "Préparer"], ["/evenements", "ti-target", "Objectifs"], ["/historique", "ti-chart-line", "Stats"]];
+  ["/preparer", "ti-adjustments", "Préparer"], ["/evenements", "ti-target", "Objectifs"], ["/historique", "ti-chart-line", "Stats"]];
 
 // Tracé du S de la marque (repris de logo-mark.svg)
 const TRACE_S = "M27 74 H57 Q72 74 72 61.5 Q72 50 57 50 H43 Q28 50 28 38.5 Q28 26 43 26 H62";
@@ -178,7 +178,7 @@ function coque(droiteHTML = "") {
 // Tâches IA : l'appel au coach tourne côté serveur ; chaque page affiche l'état au chargement
 // ---------------------------------------------------------------------------
 const TACHES = {
-  bilan_hebdo: { encours: "Sensei prépare ta semaine…", pret: "Ton plan de la semaine est prêt", page: () => "/dimanche" },
+  bilan_hebdo: { encours: "Sensei prépare ta semaine…", pret: "Ton plan de la semaine est prêt", page: () => "/preparer" },
   analyse_seance: { encours: "Sensei analyse ta séance…", pret: "L'analyse de ta séance est prête",
     page: t => `/historique#${t.parametres?.seance_id || ""}` },
   ajustement_semaine: { encours: "Sensei réajuste ta semaine…", pret: "Le réajustement de ta semaine est prêt", page: () => "/" },
@@ -564,6 +564,43 @@ function graphCourbe(conteneur, points, opts = {}) {
   zone.addEventListener("pointermove", montrer);
   zone.addEventListener("pointerleave", cacher);
 }
+
+// ---------------------------------------------------------------------------
+// Bilan de la semaine (carte) — partagé entre Semaine et Préparer ; « » si rien à montrer
+// ---------------------------------------------------------------------------
+const RESPECT = { respectee: ["vert", "Semaine respectée"], partielle: ["orange", "Partiellement respectée"],
+  non_respectee: ["rouge", "Non respectée"] };
+
+function bilanSemaineHTML(b) {
+  const cats = Object.entries(b.par_categorie || {});
+  if (!cats.length) return "";
+  const ordre = Object.keys(CATALOGUE?.categories || {});
+  cats.sort(([a], [c]) => ordre.indexOf(a) - ordre.indexOf(c));
+  const [classe, texte] = RESPECT[b.respect_global] || ["", "Rien de prévu"];
+  const jourCourt = iso => dateFR(iso, { weekday: "short" });
+  const lignes = cats.map(([c, v]) => {
+    const pct = v.prevu_min ? Math.min(100, Math.round(100 * v.realise_min / v.prevu_min)) : (v.realise_min ? 100 : 0);
+    return `<div class="bilan-cat">
+      <span class="disc ${esc(c)}"><i class="ti ${esc(CATALOGUE?.categories[c]?.icone || "ti-activity")}"></i></span>
+      <div class="seance-corps">
+        <div class="ligne entre"><span class="seance-type">${esc(libelleCategorie(c))}</span>
+          <span class="sous-texte">${v.realise_seances}/${v.prevu_seances} séance${v.prevu_seances > 1 ? "s" : ""} · ${v.realise_min}/${v.prevu_min} min</span></div>
+        <div class="progression"><div style="width:${pct}%"></div></div>
+      </div></div>`;
+  }).join("");
+  const faits = [
+    ...b.decalages.map(x => `Décalage : ${esc(x.seance)}, ${esc(jourCourt(x.de))} → ${esc(jourCourt(x.a))}`),
+    ...b.remplacements.map(x => `${esc(x.par)} à la place de ${esc(x.remplace.join(" + "))}`),
+  ];
+  return `<div class="carte">
+      <div class="ligne entre" style="margin-bottom:10px"><span class="sous-texte">Charge ${nb(b.charge_totale.realise)} / ${nb(b.charge_totale.prevu)} prévue</span>
+        <span class="badge ${classe}">${texte}</span></div>
+      ${lignes}
+      ${faits.length ? `<ul class="sous-texte bilan-faits">${faits.map(f => `<li>${f}</li>`).join("")}</ul>` : ""}
+      ${b.alerte ? `<div class="bandeau orange" style="margin-top:10px">${esc(b.alerte)}</div>` : ""}
+    </div>`;
+}
+
 
 // ---------------------------------------------------------------------------
 // Séance (carte) — partagée entre Semaine et Préparer

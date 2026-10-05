@@ -538,3 +538,38 @@ button.badge { font-family: inherit; }
 .bandeau-tache.erreur { background: var(--red-dim); color: var(--red); }
 .loader-s.mini { width: 18px; height: 18px; flex-shrink: 0; margin: 0; }
 .loader-s.mini svg { width: 18px; height: 18px; }
+
+/* ---- Préparer : parcours en étapes ------------------------------------------------------------ */
+.preparer { padding-bottom: 170px; }
+.etapes-tete { display: flex; align-items: center; gap: 10px; margin: 4px 0 6px; }
+.etapes-progression { flex: 1; height: 4px; border-radius: 2px; background: var(--bg-surface); overflow: hidden; }
+.etapes-progression > div { height: 100%; background: var(--accent); border-radius: 2px; transition: width .15s ease; }
+.etapes-pied { position: fixed; left: 0; right: 0; z-index: 19; padding: 10px 16px;
+  bottom: calc(54px + max(22px, env(safe-area-inset-bottom)));
+  background: linear-gradient(to top, var(--bg-app) 70%, transparent); }
+.etapes-pied .btn { display: block; width: 100%; max-width: 448px; margin: 0 auto; }
+.etape-corps .carte + .carte, .etape-corps .carte.curseur { margin-top: 8px; }
+.glisse-gauche { animation: glisse-gauche .15s ease-out; }
+.glisse-droite { animation: glisse-droite .15s ease-out; }
+@keyframes glisse-gauche { from { transform: translateX(24px); } to { transform: none; } }
+@keyframes glisse-droite { from { transform: translateX(-24px); } to { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .glisse-gauche, .glisse-droite, .etapes-progression > div { animation: none; transition: none; } }
+.jour-ligne { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; }
+.jour-ligne + .jour-ligne { border-top: 0.5px solid var(--border); }
+.segments.mini button { padding: 6px 9px; font-size: 11px; }
+.segments.inactif { opacity: .35; pointer-events: none; }
+.jour-contraintes + .jour-contraintes { margin-top: 12px; padding-top: 10px; border-top: 0.5px solid var(--border); }
+.jour-nom { font-size: 12px; font-weight: 600; text-transform: capitalize; color: var(--text-secondary); margin-bottom: 6px; }
+.tendance { font-size: 12px; font-weight: 600; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.tendance.vert { color: var(--green); } .tendance.orange { color: var(--orange); }
+.recap-bloc { display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px 0; background: none; border: 0;
+  border-bottom: 0.5px solid var(--border); color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; }
+.recap-bloc:last-child { border-bottom: 0; }
+.recap-titre { width: 88px; flex-shrink: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; color: var(--text-muted); }
+.recap-texte { flex: 1; min-width: 0; font-size: 13px; }
+/* Cap de la semaine (Préparer, Semaine) */
+.cap-semaine { cursor: default; }
+button.cap-semaine { display: block; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.cap-titre { font-size: 16px; font-weight: 700; }
+.cap-phrase { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+.cap-mention { font-size: 11px; color: var(--text-muted); margin-top: 8px; }

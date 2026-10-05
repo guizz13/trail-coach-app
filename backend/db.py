@@ -20,7 +20,7 @@ SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 COLONNES_JSON = {
     "temps_zones_s", "temps_zones_pct", "donnees_brutes",
     "groupes", "charges",
-    "squash_jours", "contraintes",
+    "squash_jours", "contraintes", "sortie_longue", "autres_sports",
     "reponse_json", "signaux", "modifications", "sante_zones",
 }
 
@@ -77,6 +77,12 @@ COLONNES_AJOUTEES = [
     ("seances_realisees", "douleur_zone", "TEXT"),
     ("imperatifs_semaine", "plan_modifie", "INTEGER NOT NULL DEFAULT 0"),
     ("imperatifs_semaine", "modifications", "TEXT"),     # JSON : modifications faites par l'utilisateur
+    # v6 Préparer en étapes
+    ("imperatifs_semaine", "fatigue_pro", "INTEGER"),    # 1-10
+    ("imperatifs_semaine", "vfc_ms", "REAL"),            # VFC nocturne moyenne sur 7 jours
+    ("imperatifs_semaine", "douleur_max", "INTEGER"),    # douleur max de la semaine écoulée, 0-10
+    ("imperatifs_semaine", "sortie_longue", "TEXT"),     # JSON {"jour": "samedi|dimanche|indifferent", "duree_max_min": 150}
+    ("imperatifs_semaine", "autres_sports", "TEXT"),     # JSON [{"jour": "samedi", "sport_id": "badminton"}]
     ("profil", "sante_niveau", "TEXT NOT NULL DEFAULT '100'"),   # '100' | 'vigilance' | 'blessure'
     ("profil", "sante_zones", "TEXT NOT NULL DEFAULT '[]'"),     # JSON array
     ("profil", "sante_note", "TEXT"),
