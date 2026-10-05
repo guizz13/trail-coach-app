@@ -684,3 +684,12 @@ a.bandeau-tache { text-decoration: none; }
 .bande-resume.orange { color: var(--orange); }
 .aujourdhui #forme { margin-top: 14px; }
 .tuile { text-decoration: none; color: inherit; display: block; }
+
+/* ---- Semaine : bilan repliable, ancre des jours sous l'en-tête fixe ------------------------------- */
+.bilan-replie { margin-top: 14px; }
+.bilan-replie > summary { list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 10px 0; cursor: pointer; }
+.bilan-replie > summary::-webkit-details-marker { display: none; }
+.bilan-replie[open] > summary .ti-chevron-down { transform: rotate(180deg); }
+.jour { scroll-margin-top: calc(env(safe-area-inset-top) + 70px); }
+#preparer-suivante { display: flex; justify-content: center; }

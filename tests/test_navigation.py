@@ -34,3 +34,12 @@ def test_en_tete_et_sensation_d_app():
 def test_budget_du_coach(client):
     c = client.get("/api/cout_llm").json()
     assert c["plafond_usd"] == 5.0 and c["cout_usd"] == 0
+
+
+def test_semaine_allegee():
+    html = (FRONT / "semaine.html").read_text(encoding="utf-8")
+    for retire in ('id="coach"', 'id="charge"', 'id="zones"', 'id="g-volume"', 'id="cout"', 'id="badges"'):
+        assert retire not in html, retire
+    assert html.index('id="bilan-semaine"') < html.index('id="planning"') < html.index('id="preparer-suivante"')
+    js = (FRONT / "static" / "semaine.js").read_text(encoding="utf-8")
+    assert "jour-${j.date}" in js and "defilerVersJour" in js and "<details class=\"bilan-replie\"" in js

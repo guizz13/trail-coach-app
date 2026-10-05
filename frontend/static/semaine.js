@@ -4,166 +4,56 @@
 coque();
 
 let tableau = null;          // /api/dashboard (semaine courante)
-let graphiques = null;       // /api/graphiques (12 semaines)
 let lundiAffiche = null;
-let objectifs = null;       // /api/evenements (événements à venir + plan de prépa)
+let bilanOuvert = false;     // carte « Bilan de la semaine » repliée par défaut
 
 async function charger(lundi) {
   try {
-    if (!tableau) [tableau, graphiques, objectifs] = await Promise.all([api("GET", "/api/dashboard"), api("GET", "/api/graphiques"), api("GET", "/api/evenements"), CATALOGUE_PRET]);
+    if (!tableau) [tableau] = await Promise.all([api("GET", "/api/dashboard"), CATALOGUE_PRET]);
     lundiAffiche = lundi || tableau.lundi;
     const courante = lundiAffiche === tableau.lundi;
     const dimanche = ajouterJours(lundiAffiche, 6);
-    const [jours, realisees, bilan, cap] = await Promise.all([
+    const [jours, realisees, bilan] = await Promise.all([
       courante ? tableau.semaine : api("GET", `/api/semaine?lundi=${lundiAffiche}`),
       api("GET", `/api/seances?du=${lundiAffiche}&au=${dimanche}`),
       courante ? tableau.bilan_semaine : api("GET", `/api/bilan_semaine?lundi=${lundiAffiche}`),
-      courante ? tableau.cap_semaine : api("GET", `/api/cap_semaine?lundi=${lundiAffiche}`),
     ]);
     // Verdict stocké sur chaque séance réalisée (recalculé à chaque changement)
     const verdicts = Object.fromEntries(realisees.map(s => [s.id, s.verdict]));
     rendreEntete(dimanche);
-    rendreObjectifProche();
-    rendreCap(cap, dimanche);
-    rendreForme(courante, realisees, dimanche);
-    rendreVolume(courante, realisees);
     rendreBilanSemaine(bilan);
     rendrePlanning(jours, realisees, verdicts);
     rendreReajuster(courante);
     if (courante) reprendreAjustement().catch(() => {});
     $("#ajouter").classList.toggle("hidden", !courante);   // ajout : semaine en cours uniquement
     $("#ajouter-realisee").classList.toggle("hidden", !courante);
+    $("#preparer-suivante").classList.toggle("hidden", !courante);
   } catch (e) { erreurSimple($("#planning"), e); }
 }
 
 function rendreEntete(dimanche) {
   const memeMois = lundiAffiche.slice(5, 7) === dimanche.slice(5, 7);
   $("#titre-semaine").textContent = `Semaine du ${dateFR(lundiAffiche, memeMois ? { day: "numeric" } : { day: "numeric", month: "short" })} — ${dateFR(dimanche, { day: "numeric", month: "short" })}`;
-
-  const p = tableau.profil, a = tableau.prochain_a;
-  const badges = [];
-  if (p.mode_actif === "RACE_PREP") badges.push(`<span class="badge prepa">${esc(libelleMode(p, a))}${a ? ` J-${a.dans_jours}` : ""}</span>`);
-  else {
-    badges.push(`<span class="badge accent">Entraînement libre</span>`);
-    if (a) badges.push(`<span class="badge orange">${esc(a.titre)} J-${a.dans_jours}</span>`);
-  }
-  if (tableau.phase) badges.push(`<span class="badge">${esc(PHASES[tableau.phase.phase] || tableau.phase.phase)}</span>`);
-  const sante = tableau.sante;
-  badges.push(`<button type="button" class="badge ${esc(sante.couleur)}" id="pastille-sante">${esc(sante.texte)}</button>`);
-  $("#badges").innerHTML = badges.join("");
-  $("#pastille-sante").onclick = () => feuilleSante(sante);
-}
-
-// Objectif A ou B dans les 28 prochains jours : carte sous les badges, sinon rien
-const STYLE_EVT = {
-  trail_race: { icone: "ti-run", c: "var(--orange)", dim: "var(--orange-dim)" },
-  squash_competition: { icone: "ti-ball-tennis", c: "var(--squash)", dim: "var(--squash-dim)" },
-  other: { icone: "ti-calendar-event", c: "var(--text-secondary)", dim: "var(--bg-surface)" },
-};
-const COULEUR_PHASE = { BASE: ["var(--accent)", "var(--accent-dim)"], BUILD: ["var(--orange)", "var(--orange-dim)"],
-  PIC: ["var(--phase-pic)", "var(--phase-pic-dim)"], AFFUTAGE: ["var(--green)", "var(--green-dim)"] };
-
-function rendreObjectifProche() {
-  const el = $("#objectif-proche"), jour = tableau.aujourdhui;
-  const e = objectifs.evenements.find(x => ["A", "B"].includes(x.priorite) && joursEntre(jour, x.date_evt) <= 28);
-  if (!e) { el.innerHTML = ""; return; }
-  const st = STYLE_EVT[e.type] || STYLE_EVT.other;
-  const lieu = (e.notes || "").match(/^Lieu : (.*)/);
-  const ligne2 = e.type === "trail_race" ? [e.distance_km && nb(e.distance_km, 1, "km"), e.dplus_m && nb(e.dplus_m, 0, "m D+")].filter(Boolean).join(" · ")
-    : lieu ? lieu[1] : dateFR(e.date_evt, { weekday: "long", day: "numeric", month: "long" });
-  // Phase en cours et semaine de prépa, d'après les phases rattachées à cet objectif
-  const phases = objectifs.plan_prepa.filter(p => p.evenement_id === e.id);
-  const phase = phases.find(p => p.du <= jour && jour <= p.au);
-  let ligne3 = "";
-  if (phase) {
-    const debut = phases[0].du, [c, dim] = COULEUR_PHASE[phase.phase] || ["var(--text-secondary)", "var(--bg-surface)"];
-    const total = Math.ceil(joursEntre(debut, e.date_evt) / 7), n = Math.min(total, Math.floor(joursEntre(debut, jour) / 7) + 1);
-    ligne3 = `<div class="ligne" style="margin-top:6px"><span class="badge badge-mini" style="background:${dim};color:${c}">${esc(PHASES[phase.phase] || phase.phase)}</span>
-      <span class="sous-texte" style="font-size:10px">semaine ${n}/${total}</span></div>`;
-  }
-  el.innerHTML = `<a class="objectif-proche" href="/evenements">
-      <span class="type-grand" style="background:${st.dim};color:${st.c}"><i class="ti ${st.icone}"></i></span>
-      <div style="flex:1;min-width:0">
-        <div class="ligne entre"><span class="op-nom">${esc(e.titre)}</span><span class="op-compte" style="color:${st.c}">J-${joursEntre(jour, e.date_evt)}</span></div>
-        ${ligne2 ? `<div class="op-detail">${esc(ligne2)}</div>` : ""}
-        ${ligne3}
-      </div>
-      <i class="ti ti-chevron-right op-chevron"></i></a>`;
-}
-
-// Message du coach : seulement si une analyse ou un bilan date de la semaine affichée
-// Cap de la semaine : résumé du plan validé (ou du réajustement appliqué) ; tap → message complet
-function rendreCap(cap, dimanche) {
-  const el = $("#coach");
-  if (!cap || !cap.plan) {
-    // Semaine passée sans plan : rien à proposer ; à venir ou en cours : direction Préparer
-    el.innerHTML = dimanche < tableau.aujourdhui ? "" : `<div class="carte cap-semaine vide-plan">
-        <div class="cap-phrase" style="margin-top:0">Pas encore de plan pour cette semaine.</div>
-        <a class="btn petit" href="/preparer" style="margin-top:10px"><i class="ti ti-adjustments"></i>Préparer</a></div>`;
-    return;
-  }
-  el.innerHTML = `<button type="button" class="carte cap-semaine" id="cap">
-      <div class="cap-titre">${esc(cap.titre)}</div>
-      ${cap.phrase ? `<div class="cap-phrase">${esc(cap.phrase)}</div>` : ""}
-      ${cap.focus.length ? `<div class="pill-row" style="margin-top:10px">${cap.focus.map(f => `<span class="pill">${esc(f)}</span>`).join("")}</div>` : ""}
-      ${cap.ajuste_le ? `<div class="cap-mention">Ajusté le ${esc(dateFR(cap.ajuste_le, { weekday: "long" }))}</div>` : ""}
-    </button>`;
-  $("#cap").onclick = () => feuille(`<h2>${esc(cap.titre)}</h2>
-    ${messageCoach(cap.message_coach, cap.ajuste_le ? "Réajustement de Sensei" : "Message du coach")}
-    ${cap.message_bilan ? messageCoach(cap.message_bilan, "Plan de la semaine") : ""}`);
-}
-
-function rendreForme(courante, realisees, dimanche) {
-  // Équilibre de charge : valeur du jour pour la semaine courante, fin de semaine sinon.
-  // Pendant le calibrage : jauge grisée, ni valeur ni couleur.
-  let a = null, sous = "";
-  if (courante) {
-    a = tableau.acwr;
-    if (!enCalibrage(a)) sous = `aiguë ${nb(a.charge_aigue)} · chronique ${nb(a.charge_chronique)}`;
-  } else {
-    const s = graphiques.semaines.find(x => x.lundi === lundiAffiche);
-    a = s ? { ratio: s.acwr, zone: s.acwr_zone, jours_historique: s.jours_historique, jours_calibrage: 21 } : null;
-    sous = s ? "en fin de semaine" : dimanche > tableau.aujourdhui ? "semaine à venir" : "hors des 12 dernières semaines";
-  }
-  const calib = enCalibrage(a);
-  $("#charge").innerHTML = `<div class="label">Équilibre de charge</div>
-    <div class="valeur" style="color:${calib ? "var(--text-muted)" : couleurRatio(a.ratio)}${calib ? ";font-size:15px" : ""}">${
-      calib ? (a && a.zone === "calibrage" ? esc(libelleCalibrage(a)) : "—") : nb(a.ratio, 2)}</div>
-    ${jaugeCharge(a)}
-    <div class="sous-texte" style="margin-top:6px">${calib ? "ratio affiché après 21 jours d'historique" : nb(a.ratio, 2) + " / 0,8—1,3"}</div>
-    ${sous ? `<div class="sous-texte">${esc(sous)}</div>` : ""}`;
-
-  // Répartition des zones (course) : calculée par l'API pour la semaine courante,
-  // agrégée depuis les temps par zone des séances pour les autres semaines
-  let dist = courante ? tableau.distribution : null;
-  if (!courante) {
-    const tot = { z1: 0, z2: 0, z3: 0, z4: 0, z5: 0 };
-    realisees.filter(s => sportInfo(s.sport_id).categorie === "course")
-      .forEach(s => Object.entries(s.temps_zones_s || {}).forEach(([z, v]) => { tot[z] = (tot[z] || 0) + v; }));
-    const t = Object.values(tot).reduce((a, b) => a + b, 0);
-    if (t) dist = { z1_z2: 100 * (tot.z1 + tot.z2) / t, z3: 100 * tot.z3 / t, z4_z5: 100 * (tot.z4 + tot.z5) / t };
-  }
-  $("#zones").innerHTML = `<div class="label">Répartition zones</div>
-    <div class="valeur" style="color:${!dist || !dist.z1_z2 ? "var(--text-muted)" : dist.z1_z2 >= 70 ? "var(--green)" : dist.z1_z2 >= 60 ? "var(--orange)" : "var(--red)"}">${dist && dist.z1_z2 ? nb(dist.z1_z2) + "%" : "—"}</div>
-    <div class="sous-texte">en Z1-Z2 · cible 80 %</div>${barreZones(dist)}`;
-}
-
-function rendreVolume(courante, realisees) {
-  const km = realisees.filter(s => sportInfo(s.sport_id).categorie === "course").reduce((a, s) => a + (s.distance_km || 0), 0);
-  $("#km-semaine").innerHTML = `<b style="color:var(--text-primary)">${nb(km, 1)} km</b> ${courante ? "cette sem." : "cette semaine-là"}`;
-  const sem = graphiques.semaines;
-  graphCourbe($("#g-volume"), sem.map(s => ({ valeur: s.km, detail: `semaine du ${dateFR(s.lundi, { day: "numeric", month: "short" })} · ${nb(s.dplus)} m D+` })),
-    { aire: true, unite: "km", titre: "Volume course hebdomadaire", hauteur: 110,
-      etiquettes: { 0: `S-${sem.length - 1}`, [sem.length - 8]: `S-7`, [sem.length - 4]: "S-3", [sem.length - 1]: "Auj." } });
-  const c = tableau.cout_llm;
-  const deux = v => Number(v).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  $("#cout").textContent = `Sensei ${deux(c.cout_usd)} $ / ${deux(c.plafond_usd)} $ ce mois`;
 }
 
 // ---- Bilan de la semaine : réalisé / prévu par catégorie (carte partagée, app.js) ---------------
+// Repliée par défaut : seule la ligne de synthèse (statut, séances faites) reste visible
 function rendreBilanSemaine(b) {
-  const html = bilanSemaineHTML(b);
-  $("#bilan-semaine").innerHTML = html ? `<div class="section-label">Bilan de la semaine</div>${html}` : "";
+  const html = bilanSemaineHTML(b), el = $("#bilan-semaine");
+  if (!html) { el.innerHTML = ""; return; }
+  const [classe, texte] = statutSemaine(b);
+  el.innerHTML = `<details class="bilan-replie" ${bilanOuvert ? "open" : ""}>
+      <summary><span class="section-label" style="margin:0">Bilan de la semaine</span>
+        <span class="ligne" style="gap:6px">${b.seances.prevues ? `<span class="sous-texte">${b.seances.faites}/${b.seances.prevues}</span>` : ""}
+        <span class="badge ${classe}">${esc(texte)}</span><i class="ti ti-chevron-down muted"></i></span></summary>
+      ${html}</details>`;
+  $("details", el).ontoggle = e => { bilanOuvert = e.target.open; };
+}
+
+// Ouverture : défilement vers le jour demandé (#2026-10-07, depuis Aujourd'hui) ou vers aujourd'hui
+function defilerVersJour(iso) {
+  const carte = document.getElementById(`jour-${iso}`);
+  if (carte) carte.scrollIntoView({ block: "start" });
 }
 
 function rendrePlanning(jours, realisees, verdicts) {
@@ -176,6 +66,7 @@ function rendrePlanning(jours, realisees, verdicts) {
   for (const j of jours) {
     const carte = document.createElement("div");
     carte.className = "jour" + (j.date === tableau.aujourdhui ? " aujourdhui" : "");
+    carte.id = `jour-${j.date}`;
     carte.innerHTML = `<div class="jour-titre"><b>${esc(j.jour)} ${esc(dateFR(j.date, { day: "numeric" }))}</b>
       ${j.date === tableau.aujourdhui ? "<span>aujourd'hui</span>" : ""}</div>`;
     for (const p of j.planifiees) {
@@ -353,7 +244,9 @@ document.addEventListener("touchend", e => {
   depart = null;
 }, { passive: true });
 
-charger(null).then(() => {
+const ancre = /^\d{4}-\d{2}-\d{2}$/.test(location.hash.slice(1)) ? location.hash.slice(1) : null;
+charger(ancre ? lundiDe(ancre) : null).then(() => {
   // Arrivée depuis le + d'un autre onglet : « Ajouter une séance prévue »
-  if (new URLSearchParams(location.search).get("ajouter")) { history.replaceState(null, "", "/semaine"); ajouterSeancePrevue(); }
+  if (new URLSearchParams(location.search).get("ajouter")) { history.replaceState(null, "", "/semaine"); ajouterSeancePrevue(); return; }
+  defilerVersJour(ancre || tableau.aujourdhui);
 });
