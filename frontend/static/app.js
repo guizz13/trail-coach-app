@@ -146,28 +146,36 @@ function joursEntre(a, b) { return Math.round((dateLocale(b) - dateLocale(a)) / 
 // ---------------------------------------------------------------------------
 // Coque : top bar + tab bar
 // ---------------------------------------------------------------------------
-const ONGLETS = [["/", "ti-calendar", "Semaine"], ["/import", "ti-upload", "Import"],
-  ["/preparer", "ti-adjustments", "Préparer"], ["/evenements", "ti-target", "Objectifs"], ["/historique", "ti-chart-line", "Stats"]];
+// 4 onglets + action centrale (+) ; Import et Préparer sont des actions du +
+const ONGLETS = [["/", "ti-home", "Aujourd'hui"], ["/semaine", "ti-calendar-week", "Semaine"], null,
+  ["/evenements", "ti-target", "Objectifs"], ["/historique", "ti-chart-line", "Stats"]];
 
 // Tracé du S de la marque (repris de logo-mark.svg)
 const TRACE_S = "M27 74 H57 Q72 74 72 61.5 Q72 50 57 50 H43 Q28 50 28 38.5 Q28 26 43 26 H62";
 
 function coque(droiteHTML = "") {
   const top = document.createElement("header");
-  top.className = "topbar";
+  top.className = "topbar app-header";
   // Le S du logo sert de première lettre : pas d'icône à côté, le lecteur d'écran lit « Sensei »
   top.innerHTML = `<a href="/" class="wordmark" aria-label="Sensei">
       <svg class="wordmark-s" viewBox="22.5 21.5 57 57" aria-hidden="true">
         <path d="${TRACE_S}" fill="none" stroke="currentColor" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
         <circle cx="74" cy="26" r="5.5" fill="currentColor"/>
       </svg><span aria-hidden="true">ENSEI</span></a>
-    <div id="topbar-droite">${droiteHTML}</div>`;
+    <div id="topbar-droite" class="ligne">${droiteHTML}<button type="button" class="avatar" id="avatar" aria-label="Réglages">GA</button></div>`;
   $("main").prepend(top);
+  $("#avatar").onclick = feuilleReglages;
+  // Bordure sous l'en-tête dès que le contenu défile dessous
+  const bordure = () => top.classList.toggle("scrolled", window.scrollY > 4);
+  addEventListener("scroll", bordure, { passive: true });
+  bordure();
   const nav = document.createElement("nav");
   nav.className = "tabbar";
-  nav.innerHTML = ONGLETS.map(([h, i, t]) =>
-    `<a href="${h}" class="${location.pathname === h ? "actif" : ""}"><i class="ti ${i}"></i>${t}</a>`).join("");
+  nav.innerHTML = ONGLETS.map(o => o
+    ? `<a href="${o[0]}" class="${location.pathname === o[0] ? "actif" : ""}"><i class="ti ${o[1]}"></i>${o[2]}</a>`
+    : `<button type="button" class="tab-plus" id="tab-plus" aria-label="Ajouter"><i class="ti ti-plus"></i></button>`).join("");
   document.body.appendChild(nav);
+  $("#tab-plus").onclick = feuilleActions;
   // Paysage sur téléphone : iOS ignore l'orientation du manifest, on masque l'app (CSS .rotate-overlay)
   const tourner = document.createElement("div");
   tourner.className = "rotate-overlay";
@@ -435,11 +443,73 @@ function feuille(html, id = "feuille") {
     d.id = id;
     d.className = "feuille";
     d.addEventListener("click", e => { if (e.target === d) d.close(); });
+    glisserPourFermer(d);
     document.body.appendChild(d);
   }
   d.innerHTML = `<div class="poignee"></div>${html}`;
   if (!d.open) d.showModal();          // une feuille peut en remplacer une autre (sélecteur de sport)
   return d;
+}
+
+// Glisser la feuille vers le bas pour la fermer (depuis le haut de la feuille, contenu non défilé)
+function glisserPourFermer(d) {
+  let depart = null, dy = 0;
+  d.addEventListener("touchstart", e => {
+    const haut = e.touches[0].clientY - d.getBoundingClientRect().top;
+    depart = d.scrollTop <= 0 && (haut < 56 || e.target.closest(".poignee")) ? e.touches[0].clientY : null;
+    dy = 0;
+  }, { passive: true });
+  d.addEventListener("touchmove", e => {
+    if (depart == null) return;
+    dy = Math.max(0, e.touches[0].clientY - depart);
+    d.style.transition = "none";
+    d.style.transform = `translateY(${dy}px)`;
+  }, { passive: true });
+  d.addEventListener("touchend", () => {
+    if (depart == null) return;
+    d.style.transition = "transform .18s ease";
+    d.style.transform = "";
+    if (dy > 90) d.close();
+    depart = null;
+  });
+}
+
+// Bouton + de la barre d'onglets : les actions d'ajout, depuis n'importe quel onglet
+function feuilleActions() {
+  const action = (id, icone, titre, sous) => `<button type="button" class="action-ligne" data-action="${id}">
+      <span class="action-icone"><i class="ti ${icone}"></i></span><span class="seance-corps"><span class="seance-type">${titre}</span>
+      <span class="sous-texte">${sous}</span></span><i class="ti ti-chevron-right muted"></i></button>`;
+  const d = feuille(`<h2>Ajouter</h2>
+    ${action("importer", "ti-upload", "Importer un fichier", "JSON Suunto")}
+    ${action("realisee", "ti-check", "Séance réalisée", "sans fichier : badminton, séance oubliée…")}
+    ${action("prevue", "ti-calendar-plus", "Ajouter une séance prévue", "dans la semaine en cours")}
+    ${action("preparer", "ti-adjustments", "Préparer la semaine prochaine", "le parcours en 6 étapes")}`);
+  $$("[data-action]", d).forEach(b => b.onclick = async () => {
+    const a = b.dataset.action;
+    if (a === "importer") location.href = "/import";
+    else if (a === "preparer") location.href = "/preparer";
+    else if (a === "prevue") {
+      // Sur l'onglet Semaine, l'éditeur est sur place ; ailleurs on y va
+      if (typeof ajouterSeancePrevue === "function") { d.close(); ajouterSeancePrevue(); } else location.href = "/semaine?ajouter=1";
+    } else if (a === "realisee") {
+      const r = await feuilleSeanceManuelle();
+      if (r) location.reload();
+    }
+  });
+}
+
+// Avatar : réglages (budget du coach, déconnexion)
+async function feuilleReglages() {
+  const d = feuille(`<h2>Réglages</h2><div id="reglages"><div class="squelette"></div></div>`);
+  try {
+    const c = await api("GET", "/api/cout_llm");
+    $("#reglages", d).innerHTML = `<div class="carte"><div class="ligne entre"><span class="secondaire">Budget du coach ce mois</span>
+        <b>${nb(c.cout_usd, 2)} $ / ${nb(c.plafond_usd, 2)} $</b></div>
+        <div class="progression" style="margin-top:8px"><div style="width:${Math.min(100, Math.round(100 * c.cout_usd / c.plafond_usd))}%"></div></div>
+        <div class="sous-texte" style="margin-top:6px">${c.nb_appels} appel${c.nb_appels > 1 ? "s" : ""} au coach</div></div>
+      <a class="btn petit" href="/historique#admin" style="margin-top:12px"><i class="ti ti-tool"></i>Recalcul et codes d'activité (Stats)</a>
+      <form method="post" action="/logout" style="margin-top:12px"><button type="submit" class="btn">Se déconnecter</button></form>`;
+  } catch (e) { erreurSimple($("#reglages", d), e); }
 }
 
 // ---------------------------------------------------------------------------

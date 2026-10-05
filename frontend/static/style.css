@@ -54,9 +54,9 @@ body {
   background: var(--bg-app);
   color: var(--text-primary);
   font: 400 13px/1.45 -apple-system, "SF Pro Display", system-ui, sans-serif;
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: env(safe-area-inset-bottom);   /* le haut : l'en-tête fixe porte la zone de la barre d'état */
   overflow-x: hidden;
+  overscroll-behavior-y: none;                   /* pas de rebond qui révèle un fond blanc */
 }
 main { padding: 0 16px 96px; max-width: 480px; margin: 0 auto; min-height: calc(100vh - 76px); }
 button, input, select, textarea { font: inherit; color: inherit; }
@@ -74,7 +74,21 @@ a { color: var(--accent-light); text-decoration: none; }
 /* Violet en texte : --accent-light (#A78BFA, ≥ 6:1 sur les cartes). --accent (#8B5CF6, 3,8:1)
    reste réservé aux aplats, traits et icônes. */
 /* ---- Top bar --------------------------------------------------------------- */
-.topbar { display: flex; align-items: center; justify-content: space-between; height: 52px; }
+.topbar { display: flex; align-items: center; justify-content: space-between; }
+/* En-tête fixe : avec black-translucent, la barre d'état iPhone se superpose : padding safe-area obligatoire */
+.app-header {
+  position: sticky; top: 0; z-index: 50;
+  margin: 0 -16px;
+  padding: calc(env(safe-area-inset-top) + 10px) 16px 10px;
+  background: rgba(9, 9, 12, 0.85);
+  -webkit-backdrop-filter: saturate(160%) blur(16px);
+  backdrop-filter: saturate(160%) blur(16px);
+  border-bottom: 0.5px solid transparent;
+  transition: border-color 150ms;
+  view-transition-name: app-header;
+}
+.app-header.scrolled { border-bottom-color: var(--border); }
+#topbar-droite { gap: 10px; }
 .wordmark {
   display: inline-flex;
   align-items: baseline;
@@ -95,7 +109,7 @@ a { color: var(--accent-light); text-decoration: none; }
   transform: translateY(0.02em);
 }
 .avatar {
-  width: 32px; height: 32px; border-radius: 50%; background: var(--bg-surface);
+  width: 32px; height: 32px; border-radius: 50%; background: var(--bg-surface); border: 0; padding: 0; cursor: pointer; flex-shrink: 0;
   display: grid; place-items: center; font-size: 11px; font-weight: 700; color: var(--text-secondary); letter-spacing: .5px;
 }
 h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; margin: 6px 0 14px; }
@@ -107,7 +121,8 @@ h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; margin: 6px 0 14
 /* ---- Tab bar ----------------------------------------------------------------- */
 .tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
-  display: flex; padding: 6px 0 max(22px, env(safe-area-inset-bottom));
+  display: flex; align-items: flex-start; padding: 6px 0 max(10px, env(safe-area-inset-bottom));
+  view-transition-name: tabbar;
   background: rgba(9, 9, 12, 0.92); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
   border-top: 0.5px solid var(--border);
 }
@@ -117,6 +132,12 @@ h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; margin: 6px 0 14
 }
 .tabbar a i { font-size: 22px; }
 .tabbar a.actif { color: var(--accent); }
+/* Action centrale : bouton rond violet, légèrement surélevé */
+.tab-plus {
+  flex: 0 0 auto; width: 48px; height: 48px; margin: -14px 6px 0; border: 0; border-radius: 50%;
+  background: var(--accent); color: #fff; font-size: 24px; display: grid; place-items: center; cursor: pointer;
+  box-shadow: 0 4px 14px rgba(139, 92, 246, .45);
+}
 
 /* ---- Cartes ------------------------------------------------------------------ */
 .carte { background: var(--bg-card); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 14px; }
@@ -528,7 +549,7 @@ button.badge { font-family: inherit; }
 .bilan-faits { margin: 12px 0 0; padding-left: 16px; }
 
 /* ---- Bandeau des tâches IA (sous la top bar, toutes les pages) ------------------------------ */
-#bandeau-taches { position: sticky; top: 0; z-index: 20; }
+#bandeau-taches { margin-top: 8px; }
 #bandeau-taches:empty { display: none; }
 .bandeau-tache { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 8px;
   border-radius: var(--radius-sm); font-size: 12px; font-weight: 500; }
@@ -545,7 +566,7 @@ button.badge { font-family: inherit; }
 .etapes-progression { flex: 1; height: 4px; border-radius: 2px; background: var(--bg-surface); overflow: hidden; }
 .etapes-progression > div { height: 100%; background: var(--accent); border-radius: 2px; transition: width .15s ease; }
 .etapes-pied { position: fixed; left: 0; right: 0; z-index: 19; padding: 10px 16px;
-  bottom: calc(54px + max(22px, env(safe-area-inset-bottom)));
+  bottom: calc(54px + max(10px, env(safe-area-inset-bottom)));
   background: linear-gradient(to top, var(--bg-app) 70%, transparent); }
 .etapes-pied .btn { display: block; width: 100%; max-width: 448px; margin: 0 auto; }
 .etape-corps .carte + .carte, .etape-corps .carte.curseur { margin-top: 8px; }
@@ -594,3 +615,27 @@ button.cap-semaine { display: block; width: 100%; text-align: left; font: inheri
 .seance-analyse.repliable { margin-bottom: 0; }
 .seance-detail.muted { color: var(--text-muted); opacity: .8; }
 .lien-analyser { display: inline-block; margin-top: 2px; font-size: 11px; font-weight: 600; color: var(--accent-light); cursor: pointer; }
+
+/* ---- Sensation d'app ------------------------------------------------------------------------- */
+@view-transition { navigation: auto; }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: 160ms; }
+@media (prefers-reduced-motion: reduce) {
+  @view-transition { navigation: none; }
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+}
+/* Retour tactile sur tout ce qui se touche */
+a, button, [role="button"], summary, label.coche { -webkit-tap-highlight-color: transparent; transition: transform 80ms, opacity 80ms; }
+a:active, button:not(:disabled):active, [role="button"]:active, summary:active { transform: scale(0.98); opacity: .85; }
+.tabbar a:active, .tab-plus:active { transform: scale(0.94); }
+/* Pas de sélection de texte sur les éléments d'interface ; les analyses restent sélectionnables */
+.app-header, .tabbar, .badge, .pill, button, .btn, .segments, .chips, [role="button"] { -webkit-user-select: none; user-select: none; }
+.repliable .texte, .coach p, .seance-analyse .texte { -webkit-user-select: text; user-select: text; }
+dialog.feuille { transition: transform .18s ease; }
+
+/* Feuille des actions du + */
+.action-ligne { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 8px 0;
+  background: none; border: 0; border-bottom: 0.5px solid var(--border); color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; }
+.action-ligne:last-child { border-bottom: 0; }
+.action-ligne .seance-corps { display: flex; flex-direction: column; }
+.action-icone { width: 36px; height: 36px; border-radius: var(--radius-sm); display: grid; place-items: center; font-size: 18px;
+  background: var(--accent-dim); color: var(--accent-light); flex-shrink: 0; }

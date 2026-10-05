@@ -190,7 +190,8 @@ def logout():
 # ---------------------------------------------------------------------------
 # Pages
 # ---------------------------------------------------------------------------
-PAGES = {"/": "index.html", "/import": "import.html", "/preparer": "preparer.html",
+# « / » deviendra l'accueil Aujourd'hui ; en attendant, le planning
+PAGES = {"/": "semaine.html", "/semaine": "semaine.html", "/import": "import.html", "/preparer": "preparer.html",
          "/evenements": "evenements.html", "/historique": "historique.html"}
 
 
@@ -258,6 +259,11 @@ def api_semaine(lundi: str):
 def api_cap_semaine(lundi: str):
     from datetime import date
     return services.cap_semaine(date.fromisoformat(lundi))
+
+
+@app.get("/api/cout_llm")
+def api_cout_llm():
+    return services.cout_llm_mois()
 
 
 @app.get("/api/bilan_semaine")

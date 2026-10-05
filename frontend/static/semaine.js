@@ -1,7 +1,7 @@
 /* SENSEI — page Semaine */
 "use strict";
 
-coque(`<span class="avatar">GA</span>`);
+coque();
 
 let tableau = null;          // /api/dashboard (semaine courante)
 let graphiques = null;       // /api/graphiques (12 semaines)
@@ -200,7 +200,7 @@ function rendrePlanning(jours, realisees, verdicts) {
       const mention = p ? `prévue ${jourDe(p.date_seance)}`
         : (r.remplace || []).length ? `remplace ${r.remplace.map(libelleCourt).join(", ")}` : null;
       b.innerHTML = seanceHTML(null, r, verdicts[r.id], mention ? { mention } : {});
-      b.onclick = () => { location.href = `/historique#${r.id}`; };
+      b.onclick = () => ouvrirSeance(r.id, { apresChangement: recharger });
       carte.appendChild(b);
     }
     if (!j.planifiees.length && !aAfficher.length) carte.insertAdjacentHTML("beforeend", `<div class="jour-vide">Rien de prévu</div>`);
@@ -217,8 +217,10 @@ function editer(p, realisee) {
     feuille(`<h2>${esc(libelleType(p.type))}</h2>
       <div class="sous-texte">${esc(dateFR(p.date_seance, { weekday: "long", day: "numeric", month: "long" }))} · ${esc(CRENEAUX[p.creneau] || p.creneau)} · ${esc(STATUTS[p.statut] || p.statut)}</div>
       ${p.detail ? `<p class="secondaire">${esc(p.detail)}</p>` : ""}
-      ${realisee ? `<a class="btn petit" style="margin-top:10px" href="/historique#${realisee.id}"><i class="ti ti-chart-line"></i>Voir la séance réalisée</a>` : ""}
+      ${realisee ? `<button type="button" class="btn petit" style="margin-top:10px" data-voir-realisee><i class="ti ti-chart-line"></i>Voir la séance réalisée</button>` : ""}
       <div class="sous-texte" style="margin-top:12px">Seules les séances de la semaine en cours se modifient.</div>`);
+    const v = $("#feuille [data-voir-realisee]");
+    if (v) v.onclick = () => ouvrirSeance(realisee.id, { apresChangement: recharger });
     return;
   }
   const types = TYPES_PLANIFIABLES.includes(p.type) ? TYPES_PLANIFIABLES : [p.type, ...TYPES_PLANIFIABLES];
@@ -226,7 +228,7 @@ function editer(p, realisee) {
   const opt = (liste, v, lib = {}) => liste.map(x => `<option value="${esc(x)}" ${x === v ? "selected" : ""}>${esc(lib[x] || x)}</option>`).join("");
   const d = feuille(`<h2>${p.id ? "Modifier la séance" : "Nouvelle séance"}</h2>
     ${p.version ? `<div class="sous-texte">version ${p.version} · ${esc(p.origine || "")} · ${esc(STATUTS[p.statut] || p.statut)}</div>` : ""}
-    ${realisee ? `<a class="btn petit" style="margin-top:10px" href="/historique#${realisee.id}"><i class="ti ti-chart-line"></i>Voir la séance réalisée</a>` : ""}
+    ${realisee ? `<button type="button" class="btn petit" style="margin-top:10px" data-voir-realisee><i class="ti ti-chart-line"></i>Voir la séance réalisée</button>` : ""}
     <form>
       <div class="champs-2">
         <div><label>Date</label><input type="date" name="date_seance" value="${esc(p.date_seance)}" min="${tableau.lundi}" max="${ajouterJours(tableau.lundi, 6)}" required></div>
@@ -253,6 +255,8 @@ function editer(p, realisee) {
     if (![...select.options].some(o => o.value === id)) select.insertAdjacentHTML("afterbegin", `<option value="${esc(id)}">${esc(libelleType(id))}</option>`);
     select.value = id;
   };
+  const voir = $("[data-voir-realisee]", d);
+  if (voir) voir.onclick = () => ouvrirSeance(realisee.id, { apresChangement: recharger });
   $("form", d).onsubmit = async e => {
     e.preventDefault();
     const v = Object.fromEntries(new FormData(e.target));
@@ -335,7 +339,11 @@ $("#ajouter-realisee").onclick = async () => {
   tableau = null;
   await charger(lundiAffiche);
 };
-$("#ajouter").onclick = () => editer({ date_seance: tableau && lundiAffiche === tableau.lundi ? tableau.aujourdhui : lundiAffiche, creneau: "matin", type: "EF", statut: "prevu" });
+// Aussi appelée par le bouton + de la barre d'onglets (app.js)
+function ajouterSeancePrevue() {
+  editer({ date_seance: tableau && lundiAffiche === tableau.lundi ? tableau.aujourdhui : lundiAffiche, creneau: "matin", type: "EF", statut: "prevu" });
+}
+$("#ajouter").onclick = ajouterSeancePrevue;
 let depart = null;
 document.addEventListener("touchstart", e => { const t = e.touches[0]; depart = [t.clientX, t.clientY]; }, { passive: true });
 document.addEventListener("touchend", e => {
@@ -345,4 +353,7 @@ document.addEventListener("touchend", e => {
   depart = null;
 }, { passive: true });
 
-charger(null);
+charger(null).then(() => {
+  // Arrivée depuis le + d'un autre onglet : « Ajouter une séance prévue »
+  if (new URLSearchParams(location.search).get("ajouter")) { history.replaceState(null, "", "/semaine"); ajouterSeancePrevue(); }
+});
