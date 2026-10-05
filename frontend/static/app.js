@@ -168,6 +168,15 @@ function coque(droiteHTML = "") {
   nav.innerHTML = ONGLETS.map(([h, i, t]) =>
     `<a href="${h}" class="${location.pathname === h ? "actif" : ""}"><i class="ti ${i}"></i>${t}</a>`).join("");
   document.body.appendChild(nav);
+  // Paysage sur téléphone : iOS ignore l'orientation du manifest, on masque l'app (CSS .rotate-overlay)
+  const tourner = document.createElement("div");
+  tourner.className = "rotate-overlay";
+  tourner.setAttribute("aria-hidden", "true");
+  tourner.innerHTML = `<svg class="rotate-s" viewBox="22.5 21.5 57 57">
+      <path d="${TRACE_S}" fill="none" stroke="currentColor" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="74" cy="26" r="5.5" fill="currentColor"/></svg>
+    <span>Tourne ton téléphone en portrait</span>`;
+  document.body.appendChild(tourner);
   const bandeau = document.createElement("div");
   bandeau.id = "bandeau-taches";
   top.after(bandeau);

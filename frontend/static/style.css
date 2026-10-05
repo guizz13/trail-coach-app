@@ -573,3 +573,16 @@ button.cap-semaine { display: block; width: 100%; text-align: left; font: inheri
 .cap-titre { font-size: 16px; font-weight: 700; }
 .cap-phrase { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
 .cap-mention { font-size: 11px; color: var(--text-muted); margin-top: 8px; }
+
+/* ---- Portrait uniquement sur téléphone (iOS ignore l'orientation du manifest des PWA) -------------
+   max-height 500px : un téléphone en paysage, jamais une tablette ni un ordinateur */
+.rotate-overlay { display: none; }
+@media (orientation: landscape) and (max-height: 500px) {
+  .rotate-overlay {
+    display: flex; position: fixed; inset: 0; z-index: 1000;
+    background: var(--bg-app); color: var(--text-secondary);
+    align-items: center; justify-content: center; flex-direction: column; gap: 12px;
+  }
+  body > *:not(.rotate-overlay) { visibility: hidden; }
+}
+.rotate-s { width: 48px; height: 48px; color: var(--accent); }
