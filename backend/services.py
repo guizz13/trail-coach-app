@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import re
 import sqlite3
 import uuid
 from dataclasses import asdict
@@ -744,8 +746,18 @@ def bilan_semaine(lundi: date) -> dict:
     charge_prevue_echue = sum(charge_prevue(p) for p in echues)
     charge_realisee = sum(s["charge"] or 0 for s in faites if s["date_debut"][:10] <= jour)
     ratio = charge_realisee / charge_prevue_echue if charge_prevue_echue else None
-    if not echues:
-        respect = None                                          # rien de prévu à cette date
+    # Semaine en cours (jusqu'au dimanche inclus) : jamais de verdict final, seulement « à jour »
+    # ou « en retard » sur les séances prévues jusqu'à hier inclus
+    hier = (aujourdhui() - timedelta(days=1)).isoformat()
+    en_retard = [p for p in plan if p["date_seance"] <= hier and not p["seance_realisee_id"] and p["id"] not in remplacees]
+    terminee = jour > au
+    sous_statut = None
+    if not plan:
+        respect = None                                          # rien de prévu
+    elif not terminee:
+        respect, sous_statut = "en_cours", ("en_retard" if en_retard else "a_jour")
+    elif not echues:
+        respect = None
     elif (ratio is not None and not 0.6 <= ratio <= 1.4) or len(categories_ko) * 2 > len({categorie_planifiee(p["type"]) for p in echues}):
         respect = "non_respectee"
     elif categories_ko or (ratio is not None and not 0.8 <= ratio <= 1.2):
@@ -762,13 +774,19 @@ def bilan_semaine(lundi: date) -> dict:
     return {
         "lundi": du,
         "par_categorie": par_categorie,
-        "charge_totale": {"prevu": round(sum(charge_prevue(p) for p in plan)), "realise": round(sum(s["charge"] or 0 for s in faites))},
+        "charge_totale": {"prevu": round(sum(charge_prevue(p) for p in plan)), "realise": round(sum(s["charge"] or 0 for s in faites)),
+                          "prevu_a_ce_jour": round(charge_prevue_echue)},
+        "seances": {"prevues": len(plan),
+                    "faites": sum(1 for p in plan if p["seance_realisee_id"] or p["id"] in remplacees)},
         "jours_impact_eleve": jours_impact,
         "jours_consecutifs_impact_eleve": consecutifs,
         "decalages": decalages,
         "remplacements": remplacements,
         "manques": manques,
-        "respect_global": respect,
+        "respect_global": respect,                  # en_cours | respectee | partielle | non_respectee | None
+        "sous_statut": sous_statut,                 # a_jour | en_retard (semaine en cours)
+        "seances_en_retard": len(en_retard) if not terminee else 0,
+        "semaine_terminee": terminee,
         "categories_sous_80": sorted(categories_ko),
         "alerte": alerte,
     }
@@ -1132,6 +1150,12 @@ def recalculer_tout() -> dict:
     horodatage = maintenant().isoformat(timespec="seconds")
     liens_avant = liaisons_actuelles()
     incoherentes = defaire_liaisons_incoherentes()
+    types_corriges = []
+    for p in db.fetch_all("SELECT * FROM seances_planifiees"):
+        nouveau = type_coherent(p["type"], p["detail"])
+        if nouveau != p["type"]:
+            db.maj("seances_planifiees", p["id"], {"type": nouveau})
+            types_corriges.append({"seance": f"{p['date_seance']} {p['type']}", "type": nouveau})
     with db.connexion() as c:
         c.execute("UPDATE seances_planifiees SET seance_realisee_id = NULL "
                   "WHERE seance_realisee_id IN (SELECT id FROM seances_realisees WHERE lien_manuel = 0)")
@@ -1161,7 +1185,7 @@ def recalculer_tout() -> dict:
                  if liens_avant.get(i) != liens_apres.get(i) and i in plan]
     return {"seances": len(seances), "analyses_mises_a_jour": nb_analyses, "seances_sans_analyse": sans_analyse,
             "seances_liees": len(liens_apres), "liaisons_corrigees": corrigees,
-            "liaisons_incoherentes_defaites": incoherentes, "changements": changements}
+            "liaisons_incoherentes_defaites": incoherentes, "types_corriges": types_corriges, "changements": changements}
 
 
 recalculer_verdicts = recalculer_tout      # nom historique de la route admin
@@ -1514,7 +1538,8 @@ def appliquer_ajustement(analyse_id: int) -> dict:
             # Les séances prévues non liées du jour sont remplacées ; les liées restent
             c.execute("DELETE FROM seances_planifiees WHERE date_seance = ? AND seance_realisee_id IS NULL", (d_iso,))
             for x in seances:
-                v = valider_planifiee({"date_seance": d_iso, "creneau": x.get("creneau"), "type": x.get("type"),
+                v = valider_planifiee({"date_seance": d_iso, "creneau": x.get("creneau"),
+                                       "type": type_coherent(x.get("type"), x.get("description")),
                                        "duree_min": x.get("duree_min"), "distance_km": x.get("distance_km"),
                                        "intensite": x.get("intensite"), "detail": x.get("description")})
                 db.inserer("seances_planifiees", {**v, "origine": "ajustement_semaine"}, conn=c)
@@ -2207,6 +2232,23 @@ def normaliser_position_prepa(pp: dict) -> dict:
     return {**pp, "phase": code, "detail": detail}
 
 
+TYPES_SPLIT = {"push": "muscu_push", "pull": "muscu_pull", "jambes": "muscu_jambes", "legs": "muscu_jambes"}
+log = logging.getLogger("sensei")
+
+
+def type_coherent(type_: Optional[str], detail: Optional[str]) -> Optional[str]:
+    """Le LLM peut écrire « muscu_push » avec une description « Pull A : tractions… » : le contenu
+    fait foi, le type est corrigé d'après le premier mot de la description, et l'écart est loggué."""
+    if type_ not in TYPES_SPLIT.values() or not detail:
+        return type_
+    premier = re.split(r"[^a-z]+", sports.sans_accents(detail).strip())[0]
+    attendu = TYPES_SPLIT.get(premier)
+    if attendu and attendu != type_:
+        log.warning("Type de séance incohérent avec sa description : %s → %s (« %s »)", type_, attendu, detail[:60])
+        return attendu
+    return type_
+
+
 def valider_semaine(analyse_id: int, seances: Optional[list[dict]] = None) -> dict:
     """Écrit la semaine (éventuellement éditée) dans seances_planifiees, si les règles dures passent."""
     a = db.analyse(analyse_id)
@@ -2223,6 +2265,7 @@ def valider_semaine(analyse_id: int, seances: Optional[list[dict]] = None) -> di
     lignes = []
     for s in seances:
         d = lundi + timedelta(days=JOURS.index(s["jour"].lower()))
+        s = {**s, "type": type_coherent(s.get("type"), s.get("detail"))}
         lignes.append({**valider_planifiee({**s, "date_seance": d.isoformat(), "statut": None}),
                        "origine": "bilan_hebdo", "cree_le": maintenant().isoformat(timespec="seconds")})
     jour_repos = (sem.get("jour_repos") or "").lower()

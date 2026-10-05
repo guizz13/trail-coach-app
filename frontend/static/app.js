@@ -671,12 +671,24 @@ function graphCourbe(conteneur, points, opts = {}) {
 const RESPECT = { respectee: ["vert", "Semaine respectée"], partielle: ["orange", "Partiellement respectée"],
   non_respectee: ["rouge", "Non respectée"] };
 
+// Semaine en cours : « En cours · à jour » ou « En cours · n séance(s) en retard » ; verdict une fois finie
+function statutSemaine(b) {
+  if (b.respect_global === "en_cours") {
+    const n = b.seances_en_retard;
+    return n ? ["orange", `En cours · ${n} séance${n > 1 ? "s" : ""} en retard`] : ["accent", "En cours · à jour"];
+  }
+  return RESPECT[b.respect_global] || ["", "Rien de prévu"];
+}
+const ligneCharge = b => b.respect_global === "en_cours"
+  ? `Charge ${nb(b.charge_totale.realise)} / ${nb(b.charge_totale.prevu_a_ce_jour)} prévue à ce jour (${nb(b.charge_totale.prevu)} sur la semaine)`
+  : `Charge ${nb(b.charge_totale.realise)} / ${nb(b.charge_totale.prevu)} prévue`;
+
 function bilanSemaineHTML(b) {
   const cats = Object.entries(b.par_categorie || {});
   if (!cats.length) return "";
   const ordre = Object.keys(CATALOGUE?.categories || {});
   cats.sort(([a], [c]) => ordre.indexOf(a) - ordre.indexOf(c));
-  const [classe, texte] = RESPECT[b.respect_global] || ["", "Rien de prévu"];
+  const [classe, texte] = statutSemaine(b);
   const jourCourt = iso => dateFR(iso, { weekday: "short" });
   const lignes = cats.map(([c, v]) => {
     const pct = v.prevu_min ? Math.min(100, Math.round(100 * v.realise_min / v.prevu_min)) : (v.realise_min ? 100 : 0);
@@ -693,7 +705,7 @@ function bilanSemaineHTML(b) {
     ...b.remplacements.map(x => `${esc(x.par)} à la place de ${esc(x.remplace.join(" + "))}`),
   ];
   return `<div class="carte">
-      <div class="ligne entre" style="margin-bottom:10px"><span class="sous-texte">Charge ${nb(b.charge_totale.realise)} / ${nb(b.charge_totale.prevu)} prévue</span>
+      <div class="ligne entre" style="margin-bottom:10px"><span class="sous-texte">${esc(ligneCharge(b))}</span>
         <span class="badge ${classe}">${texte}</span></div>
       ${lignes}
       ${faits.length ? `<ul class="sous-texte bilan-faits">${faits.map(f => `<li>${f}</li>`).join("")}</ul>` : ""}

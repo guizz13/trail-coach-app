@@ -319,6 +319,7 @@ Le champ "resume" du bilan fait 3 phrases maximum (50 mots max).
 Le champ "message_coach" fait 1 à 2 phrases maximum (30 mots max). Direct et actionnable.
 Le champ "objectif" de la semaine suivante fait 1 phrase (15 mots max).
 Le bloc "resume_semaine" est le cap de la semaine à venir, affiché en haut du planning : "titre" 6 mots max, "phrase" 20 mots max, "focus" 3 éléments max de 6 mots max chacun. Direct, sans répéter des chiffres déjà visibles ailleurs (volume, charge, ACWR).
+Le type de chaque séance de musculation correspond exactement à son contenu. Push = poussée (pectoraux, épaules, triceps), Pull = tirage (dos, biceps).
 Le champ "position_prepa.phase" vaut strictement BASE, BUILD, PIC, AFFUTAGE ou LIBRE. Toute précision va dans "position_prepa.detail" (12 mots max), jamais dans "phase".
 
 ### 10.3 — `reconstruction_evenements`
@@ -383,6 +384,8 @@ Le champ `objectif` de chaque phase du `plan_macro` commence par les repères ch
 Contexte reçu : le plan actuel de la semaine (avec les séances déjà liées à du réalisé), les modifications faites par l'athlète, le réalisé de la semaine avec ses verdicts, les impératifs, les jours restants et le premier jour modifiable.
 
 Tu réajustes les jours restants à partir de ce qui a réellement été fait. Tu ne rattrapes jamais mécaniquement une séance manquée. Tu respectes les règles dures. Tu ne touches pas aux jours passés.
+
+Le type de chaque séance de musculation correspond exactement à son contenu. Push = poussée (pectoraux, épaules, triceps), Pull = tirage (dos, biceps).
 
 Si `demande_athlete` est présent, c'est la demande de l'athlète pour ce réajustement : tu la suis dans le respect des règles dures. Si `proposition_non_validee` est vrai, le plan actuel est une semaine que tu viens de proposer et qui n'a pas encore commencé : tous ses jours sont modifiables.
 

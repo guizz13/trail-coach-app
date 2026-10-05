@@ -182,7 +182,12 @@ def test_suppression_en_cascade():
 
 
 # ---- 3. Bilan de la semaine par catégorie -------------------------------------------------------------
-def test_bilan_semaine_cas_reel():
+def semaine_terminee(monkeypatch):
+    """Le verdict final n'existe qu'une fois la semaine finie : on se place le lundi suivant."""
+    monkeypatch.setattr(services, "aujourdhui", lambda: date(2026, 10, 5))
+
+
+def test_bilan_semaine_cas_reel(monkeypatch):
     x = semaine_du_28()
     # Reste de la semaine, fait comme prévu
     for jour, type_, sport, duree, rpe in (("2026-09-28", "muscu_pull", "muscu", 50, 4), ("2026-09-29", "velo", "velo_salle", 60, 4),
@@ -190,6 +195,8 @@ def test_bilan_semaine_cas_reel():
         prevoir(jour, type_, "soir", duree)
         faire(sport, f"{jour}T18:00", duree, rpe)
     services.remplacer(x["bad"], [x["ef_sam"]])
+    assert services.bilan_semaine(LUNDI)["respect_global"] == "en_cours"           # dimanche : pas fini
+    semaine_terminee(monkeypatch)
     b = services.bilan_semaine(LUNDI)
     assert b["par_categorie"]["course"] == {"prevu_seances": 3, "realise_seances": 2, "prevu_min": 125, "realise_min": 85}
     assert b["par_categorie"]["raquette"] == {"prevu_seances": 1, "realise_seances": 2, "prevu_min": 60, "realise_min": 135}
@@ -198,16 +205,18 @@ def test_bilan_semaine_cas_reel():
     assert b["remplacements"] == [{"par": "badminton 75 min", "remplace": ["EF 40 min"]}]
     assert b["manques"] == [] and b["categories_sous_80"] == []
     assert b["jours_consecutifs_impact_eleve"] == [["2026-09-30", "2026-10-01"], ["2026-10-03", "2026-10-04"]]
-    assert b["charge_totale"] == {"prevu": 750, "realise": 845}
+    assert b["charge_totale"] == {"prevu": 750, "realise": 845, "prevu_a_ce_jour": 750}
+    assert b["seances"] == {"prevues": 7, "faites": 7} and b["semaine_terminee"]
     assert b["respect_global"] == "respectee"
     assert b["alerte"] is None                                      # santé 100 %
 
 
-def test_bilan_semaine_charge_trop_haute():
+def test_bilan_semaine_charge_trop_haute(monkeypatch):
     x = semaine_du_28()                                             # semaine courte : le badminton pèse lourd
     services.remplacer(x["bad"], [x["ef_sam"]])
+    semaine_terminee(monkeypatch)
     b = services.bilan_semaine(LUNDI)
-    assert b["categories_sous_80"] == [] and b["charge_totale"] == {"prevu": 260, "realise": 415}
+    assert b["categories_sous_80"] == [] and b["charge_totale"]["prevu"] == 260 and b["charge_totale"]["realise"] == 415
     assert b["respect_global"] == "non_respectee"                  # 160 % de la charge prévue
 
 
@@ -221,7 +230,8 @@ def test_bilan_semaine_alerte_vigilance_achille():
     assert services.tableau_de_bord(date(2026, 10, 4))["bilan_semaine"]["alerte"] == b["alerte"]
 
 
-def test_bilan_semaine_respect():
+def test_bilan_semaine_respect(monkeypatch):
+    semaine_terminee(monkeypatch)
     # Deux EF prévues et passées, une seule faite, sans remplacement : course à 50 % → partielle au mieux
     prevoir("2026-09-29", "EF", duree=40)
     prevoir("2026-10-01", "EF", duree=40)
@@ -290,3 +300,39 @@ def test_api_remplacement_et_bilan(client):
     assert r.status_code == 200 and r.json()["seance"]["remplace"] == []
     assert client.post(f"/api/seances_realisees/{x['push']}/remplacer",
                        json={"seance_planifiee_ids": [x["ef_sam"]]}).status_code == 422   # liée : refus
+
+
+
+# ---- v7 : semaine en cours ----------------------------------------------------------------------------
+def test_lundi_une_seance_faite_sur_une_prevue(monkeypatch):
+    """Lundi, 1 séance faite sur 1 prévue jusque-là : « En cours · à jour », jamais « respectée »."""
+    monkeypatch.setattr(services, "aujourdhui", lambda: date(2026, 9, 28))
+    prevoir("2026-09-28", "EF", duree=40)
+    for j in ("2026-09-29", "2026-09-30", "2026-10-01"):
+        prevoir(j, "muscu_push", duree=50)
+    faire("course_route", "2026-09-28T07:00", 40)
+    b = services.bilan_semaine(LUNDI)
+    assert (b["respect_global"], b["sous_statut"], b["seances_en_retard"]) == ("en_cours", "a_jour", 0)
+    assert b["seances"] == {"prevues": 4, "faites": 1}
+    assert b["charge_totale"]["prevu_a_ce_jour"] == 80 and b["charge_totale"]["prevu"] == 380
+
+
+def test_mercredi_une_seance_en_retard(monkeypatch):
+    monkeypatch.setattr(services, "aujourdhui", lambda: date(2026, 9, 30))
+    prevoir("2026-09-28", "EF", duree=40)
+    prevoir("2026-09-29", "muscu_push", duree=50)
+    prevoir("2026-09-30", "EF", duree=40)                            # aujourd'hui : pas encore en retard
+    faire("course_route", "2026-09-28T07:00", 40)
+    b = services.bilan_semaine(LUNDI)
+    assert (b["respect_global"], b["sous_statut"], b["seances_en_retard"]) == ("en_cours", "en_retard", 1)
+
+
+def test_report_et_remplacement_comptent_comme_faits(monkeypatch):
+    monkeypatch.setattr(services, "aujourdhui", lambda: date(2026, 10, 2))
+    lundi_ef = prevoir("2026-09-28", "EF", duree=40)
+    prevoir("2026-09-30", "muscu_push", duree=50)
+    bad = faire("badminton", "2026-09-28T19:00", 60, 7)
+    services.remplacer(bad, [lundi_ef])
+    faire("muscu", "2026-10-01T07:00", 50)                            # Push de mercredi faite jeudi
+    b = services.bilan_semaine(LUNDI)
+    assert b["sous_statut"] == "a_jour" and b["seances"] == {"prevues": 2, "faites": 2}
