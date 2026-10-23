@@ -11,7 +11,7 @@ Stratégie de coût :
   - System prompt mis en cache (cache_control) → 10 % du prix input aux appels suivants
   - Modèles : claude-sonnet-5 pour analyse_seance (appel fréquent, à chaque import),
     claude-fable-5-1 pour bilan_hebdo et reconstruction_evenements (raisonnement long)
-  - Compteur de tokens persisté → alerte à 5 $ cumulés dans le mois
+  - Compteur de tokens persisté → seuil d'alerte à 5 $ cumulés dans le mois (affiché, jamais bloquant)
 
 Vérifier la syntaxe SDK à jour : https://docs.claude.com/en/api/overview
 """
@@ -53,6 +53,7 @@ MAX_TOKENS_PAR_APPEL = {
     "ajustement_semaine": 8000,
 }
 
+# Seuil d'alerte mensuel : son dépassement est signalé dans l'app, les appels continuent
 PLAFOND_MENSUEL_USD = 5.0
 FICHIER_COMPTEUR = Path(os.getenv("COACH_DATA_DIR", ".")) / "usage_llm.json"
 PROMPT_PATH = Path(__file__).parent.parent / "prompts" / "system_prompt_coach.md"
@@ -151,12 +152,6 @@ class CoachLLM:
     def _appel(self, type_appel: str, contexte: dict, profil: dict,
                statut_sante: str, mode: str) -> dict:
         usage = _charger_usage()
-        if usage.cout_usd >= PLAFOND_MENSUEL_USD:
-            raise RuntimeError(
-                f"Plafond mensuel LLM atteint ({usage.cout_usd:.2f} $ / {PLAFOND_MENSUEL_USD} $). "
-                "Appel refusé. Relever PLAFOND_MENSUEL_USD ou attendre le mois prochain."
-            )
-
         modele = MODELE_PAR_APPEL[type_appel]
         user_msg = (
             f"<type_appel>{type_appel}</type_appel>\n"

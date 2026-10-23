@@ -165,6 +165,8 @@ function coque(droiteHTML = "") {
     <div id="topbar-droite" class="ligne">${droiteHTML}<button type="button" class="avatar" id="avatar" aria-label="Réglages">GA</button></div>`;
   $("main").prepend(top);
   $("#avatar").onclick = feuilleReglages;
+  // Seuil mensuel du coach dépassé : pastille sur l'avatar (les appels continuent)
+  api("GET", "/api/cout_llm").then(c => { $("#avatar").classList.toggle("alerte", !!c.depasse); }).catch(() => {});
   // Bordure sous l'en-tête dès que le contenu défile dessous
   const bordure = () => top.classList.toggle("scrolled", window.scrollY > 4);
   addEventListener("scroll", bordure, { passive: true });
@@ -503,10 +505,11 @@ async function feuilleReglages() {
   const d = feuille(`<h2>Réglages</h2><div id="reglages"><div class="squelette"></div></div>`);
   try {
     const c = await api("GET", "/api/cout_llm");
-    $("#reglages", d).innerHTML = `<div class="carte"><div class="ligne entre"><span class="secondaire">Budget du coach ce mois</span>
-        <b>${nb(c.cout_usd, 2)} $ / ${nb(c.plafond_usd, 2)} $</b></div>
-        <div class="progression" style="margin-top:8px"><div style="width:${Math.min(100, Math.round(100 * c.cout_usd / c.plafond_usd))}%"></div></div>
-        <div class="sous-texte" style="margin-top:6px">${c.nb_appels} appel${c.nb_appels > 1 ? "s" : ""} au coach</div></div>
+    $("#reglages", d).innerHTML = `<div class="carte"><div class="ligne entre"><span class="secondaire">Coût du coach ce mois</span>
+        <b style="color:${c.depasse ? "var(--red)" : "inherit"}">${nb(c.cout_usd, 2)} $ / ${nb(c.plafond_usd, 2)} $</b></div>
+        <div class="progression ${c.depasse ? "depasse" : ""}" style="margin-top:8px"><div style="width:${Math.min(100, Math.round(100 * c.cout_usd / c.plafond_usd))}%"></div></div>
+        <div class="sous-texte" style="margin-top:6px">${c.nb_appels} appel${c.nb_appels > 1 ? "s" : ""} au coach</div>
+        ${c.depasse ? `<div class="bandeau rouge">Seuil de ${nb(c.plafond_usd, 0)} $ dépassé de ${nb(c.cout_usd - c.plafond_usd, 2)} $ ce mois. Sensei continue de répondre.</div>` : ""}</div>
       <a class="btn petit" href="/historique#admin" style="margin-top:12px"><i class="ti ti-tool"></i>Recalcul et codes d'activité (Stats)</a>
       <form method="post" action="/logout" style="margin-top:12px"><button type="submit" class="btn">Se déconnecter</button></form>`;
   } catch (e) { erreurSimple($("#reglages", d), e); }

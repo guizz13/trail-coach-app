@@ -1330,7 +1330,8 @@ def cout_llm_mois() -> dict:
     import llm_client
     u = llm_client.cout_du_mois()
     return {"mois": u.mois, "cout_usd": round(u.cout_usd, 4), "nb_appels": u.nb_appels,
-            "plafond_usd": llm_client.PLAFOND_MENSUEL_USD}
+            "plafond_usd": llm_client.PLAFOND_MENSUEL_USD,
+            "depasse": u.cout_usd > llm_client.PLAFOND_MENSUEL_USD}   # seuil d'alerte : les appels continuent
 
 
 def tableau_de_bord(d: Optional[date] = None) -> dict:

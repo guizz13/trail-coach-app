@@ -693,3 +693,9 @@ a.bandeau-tache { text-decoration: none; }
 .bilan-replie[open] > summary .ti-chevron-down { transform: rotate(180deg); }
 .jour { scroll-margin-top: calc(env(safe-area-inset-top) + 70px); }
 #preparer-suivante { display: flex; justify-content: center; }
+
+/* Seuil mensuel du coach dépassé (signalé, jamais bloquant) */
+.avatar.alerte { position: relative; }
+.avatar.alerte::after { content: ""; position: absolute; top: 0; right: 0; width: 9px; height: 9px; border-radius: 50%;
+  background: var(--red); border: 2px solid var(--bg-app); }
+.progression.depasse > div { background: var(--red); }

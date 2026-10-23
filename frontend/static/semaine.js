@@ -168,14 +168,13 @@ function editer(p, realisee) {
 const MESSAGES_AJUSTEMENT = ["Sensei relit ta semaine...", "Prise en compte du réalisé...", "Vérification des règles...", "Réajustement des jours restants..."];
 
 function rendreReajuster(courante) {
-  const el = $("#reajuster"), a = tableau.ajustement, c = tableau.cout_llm;
+  const el = $("#reajuster"), a = tableau.ajustement;
   if (!courante || !a || !a.possible) { el.innerHTML = ""; return; }
-  const budget = c.cout_usd >= c.plafond_usd;
-  el.innerHTML = `<button type="button" class="btn" id="btn-reajuster" style="margin-top:8px" ${budget ? "disabled" : ""}>
-      <i class="ti ti-wand"></i>${budget ? "Budget IA du mois atteint" : "Réajuster avec Sensei"}</button>
+  el.innerHTML = `<button type="button" class="btn" id="btn-reajuster" style="margin-top:8px">
+      <i class="ti ti-wand"></i>Réajuster avec Sensei</button>
     <div class="sous-texte" style="text-align:center;margin-top:4px">${esc(a.raisons.join(" · "))}</div>
     <div id="apercu-ajustement"></div>`;
-  if (!budget) $("#btn-reajuster").onclick = reajuster;
+  $("#btn-reajuster").onclick = reajuster;
 }
 
 async function reajuster() {

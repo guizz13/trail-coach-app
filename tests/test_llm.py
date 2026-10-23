@@ -380,3 +380,22 @@ def test_plafond_ne_s_applique_pas_avec_protocole_ou_sans_historique():
     assert services.plafond_course_vigilance(date(2026, 9, 28)) == 11             # 30 min / 3 × 1,1
     services.enregistrer_sante({"niveau": "vigilance", "zones": ["Achille D"], "protocole": "30 min max"})
     assert services.plafond_course_vigilance(date(2026, 9, 28)) is None
+
+
+# ---- Seuil mensuel : signalé, jamais bloquant ----------------------------------------------------------
+def test_seuil_mensuel_depasse_l_appel_part_quand_meme(monkeypatch):
+    import json as _json
+    from types import SimpleNamespace
+    u = llm_client._charger_usage()
+    u.cout_usd = 6.40                                       # au-delà des 5 $
+    llm_client._sauver_usage(u)
+    reponse = SimpleNamespace(
+        content=[SimpleNamespace(type="text", text=_json.dumps({"analyse": "ok"}))],
+        usage=SimpleNamespace(input_tokens=100, output_tokens=20, cache_read_input_tokens=0, cache_creation_input_tokens=0))
+    client = llm_client.CoachLLM.__new__(llm_client.CoachLLM)
+    client.system_prompt = "prompt"
+    client.client = SimpleNamespace(messages=SimpleNamespace(create=lambda **_: reponse))
+    assert client._appel("analyse_seance", {}, {}, "100%", "BASE") == {"analyse": "ok"}
+    assert llm_client.cout_du_mois().nb_appels == 1 and llm_client.cout_du_mois().cout_usd > 6.40
+    c = services.cout_llm_mois()
+    assert c["depasse"] is True and c["plafond_usd"] == 5.0
